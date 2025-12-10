@@ -17,6 +17,7 @@ Build a native Home Assistant custom integration for the Polyaire AirTouch 3 air
 - `PROTOCOL_DOCUMENTATION.md` - Complete protocol specification (attached to project)
 - [Home Assistant Developer Docs](https://developers.home-assistant.io/)
 - [Home Assistant Climate Entity](https://developers.home-assistant.io/docs/core/entity/climate/)
+- [Vzduch Dotek](https://github.com/ozczecho/vzduch-dotek)
 
 ---
 
