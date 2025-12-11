@@ -181,10 +181,9 @@ class AirTouch3Client:
             state = await self.get_state()
             if state is None:
                 return False
-            zone_state = next((z for z in state.zones if z.data_index == zone_index), None)
-            if zone_state is None:
+            if zone_index >= len(state.zones):
                 return False
-            current = zone_state.damper_percent
+            current = state.zones[zone_index].damper_percent
             if current == target:
                 return True
             if current < target:
