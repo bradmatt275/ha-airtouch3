@@ -346,9 +346,9 @@ class AirTouch3Client:
 
             group_byte = data[const.OFFSET_GROUP_DATA + zone_num]
             group_index = (group_byte >> 4) & 0x0F  # app uses high nibble (bits 4-7)
-            # Use the high-nibble group index even if it exceeds the configured zone count,
-            # because the device may expose additional slots in zone data.
-            data_index = group_index if 0 <= group_index < const.STATE_ZONE_MAX else zone_num
+            data_index = group_byte & 0x0F
+            if not (0 <= data_index < const.STATE_ZONE_MAX):
+                data_index = zone_num
 
             zone_data = data[const.OFFSET_ZONE_DATA + data_index]
             # Combine high-bit (app binary string) and low-bit (protocol doc) interpretations.
@@ -426,6 +426,15 @@ class AirTouch3Client:
                     low_battery=low_battery,
                     temperature=temperature,
                 )
+            )
+
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            zone_bytes = data[const.OFFSET_ZONE_DATA : const.OFFSET_ZONE_DATA + const.STATE_ZONE_MAX]
+            group_bytes = data[const.OFFSET_GROUP_DATA : const.OFFSET_GROUP_DATA + const.STATE_ZONE_MAX]
+            LOGGER.debug(
+                "Zone data bytes: %s; Group data bytes: %s",
+                " ".join(f"{b:02x}" for b in zone_bytes),
+                " ".join(f"{b:02x}" for b in group_bytes),
             )
 
         return SystemState(
