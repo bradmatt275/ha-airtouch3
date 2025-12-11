@@ -122,6 +122,15 @@ class AirTouch3Client:
 
         return await self._wait_for_state()
 
+    async def refresh_state(self) -> Optional[SystemState]:
+        """Force a fresh state fetch by sending init command."""
+        if not self.connected:
+            if not await self.connect():
+                return None
+
+        init_msg = self._create_command(const.CMD_INIT)
+        return await self._send_command(init_msg)
+
     async def ac_power_toggle(self, ac_num: int) -> bool:
         """Toggle AC power."""
         return await self._send_ac_command(ac_num, const.AC_POWER_TOGGLE, 0)

@@ -50,7 +50,8 @@ class AirTouch3Coordinator(DataUpdateCoordinator[SystemState]):
                 if not await self.client.connect():
                     raise UpdateFailed("Cannot connect to device")
 
-            state = await self.client.get_state()
+            # Always fetch fresh state instead of returning cached
+            state = await self.client.refresh_state()
             if state is None:
                 raise UpdateFailed("No state received")
 
