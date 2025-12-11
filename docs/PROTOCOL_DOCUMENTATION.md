@@ -734,6 +734,31 @@ sensor2_index = zone_number * 2 + 1
 2. Wireless sensor 1 for the zone (slot = zone * 2)
 3. Wireless sensor 2 for the zone (slot = zone * 2 + 1)
 
+**Detecting Zone Temperature Capability:**
+
+To determine if a zone has temperature control capability (can toggle between °C setpoint and % damper modes), check ALL of the following sources:
+
+```python
+def zone_has_sensor(zone_num, state):
+    """Check if zone has any temperature sensor source."""
+    # 1. Check touchpad assignment (bytes 443-444, 1-indexed)
+    touchpad1_zone = state[443] - 1  # -1 if unassigned
+    touchpad2_zone = state[444] - 1
+    has_touchpad = (touchpad1_zone == zone_num) or (touchpad2_zone == zone_num)
+
+    # 2. Check wireless sensor slots (bytes 451+)
+    sensor1_slot = zone_num * 2
+    sensor2_slot = zone_num * 2 + 1
+
+    # Sensor is available if bit 7 is set
+    has_sensor1 = bool(state[451 + sensor1_slot] & 0x80) if sensor1_slot < 32 else False
+    has_sensor2 = bool(state[451 + sensor2_slot] & 0x80) if sensor2_slot < 32 else False
+
+    return has_touchpad or has_sensor1 or has_sensor2
+```
+
+**Important:** The `sensor_source` field in the zone feedback byte (bytes 296-311, bits 5-7) is NOT reliable for detecting sensor capability. It may be 0 even when a wireless sensor is present. Always check the actual wireless sensor bytes for the availability bit.
+
 **Note:** The original documentation had bits inverted. The app's decompiled code uses `substring(0, 1)` for available and `substring(1, 2)` for low battery on a binary string with bit 7 at index 0. This means bit 7 = available, bit 6 = low battery, and bits 0-5 = temperature. Wireless sensors are battery-powered and transmit intermittently.
 
 ---
@@ -1651,6 +1676,7 @@ This documentation is based on reverse engineering of the AirTouch 3 Android app
 
 ## Version History
 
+- **v1.1** (2025-12-12): Added zone control mode toggle and value adjustment commands, sensor capability detection
 - **v1.0** (2025-12-10): Initial documentation based on AirTouch3 v2.12 APK decompilation
 
 ---

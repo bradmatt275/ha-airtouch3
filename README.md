@@ -1,13 +1,29 @@
 # AirTouch 3 Home Assistant Integration
 
-Control your Polyaire AirTouch 3 air conditioning system locally from Home Assistant. The integration speaks the native TCP protocol (port 8899) to expose AC climate entities, zone switches, and temperature sensors.
+Control your Polyaire AirTouch 3 air conditioning system locally from Home Assistant. The integration speaks the native TCP protocol (port 8899) to expose AC climate entities, zone controls, and temperature sensors.
 
 ## Features
-- Climate entities for each AC unit (on/off, mode, fan speed, target temperature)
-- Zone switches with damper percentage attributes
-- Temperature sensors for AC rooms, touchpads, and wireless sensors
-- Options for polling interval and enabling zones/sensors
-- Tested with Home Assistant 2024.1+ (matches minimum in `hacs.json`)
+
+### AC Unit Controls
+- Power switch for each AC unit
+- Mode selection (Auto, Heat, Dry, Fan, Cool)
+- Fan speed selection (Auto, Quiet, Low, Medium, High, Powerful - based on unit capabilities)
+- Temperature sensor showing current room temperature
+
+### Zone Controls
+Each zone is represented as a sub-device with the following entities:
+- **Power switch**: Turn zone on/off
+- **Setpoint**: Adjust temperature setpoint (°C) or damper opening (%) depending on control mode
+- **Temp Control switch**: Toggle between temperature and percentage control modes (only for zones with temperature sensors)
+- **Temperature sensor**: Current zone temperature (from touchpad or wireless sensor)
+- **Damper sensor**: Current damper opening percentage
+
+### Additional Features
+- Automatic detection of wireless temperature sensors
+- Support for touchpad temperature readings
+- Low battery alerts for wireless sensors (via sensor attributes)
+- Configurable polling interval
+- Options to enable/disable zone and sensor entities
 
 ## Installation
 
@@ -37,8 +53,10 @@ Control your Polyaire AirTouch 3 air conditioning system locally from Home Assis
 - **Stale entities**: Use the Configure button to adjust options or reload the integration.
 
 ## Notes
-- Commands are toggles/steps; the integration checks state before sending where possible.
+- The AirTouch 3 protocol uses toggle commands rather than explicit on/off. The integration uses optimistic state handling to provide responsive UI feedback.
+- Zone setpoint adjustments use increment/decrement commands stepped until the target is reached.
 - Brand-specific mode/fan remapping is handled automatically based on the device state bytes.
+- Zones are grouped as sub-devices under the main AirTouch 3 device for cleaner organization.
 
 ## Credits
 - Protocol based on reverse engineering of the AirTouch 3 Android app.

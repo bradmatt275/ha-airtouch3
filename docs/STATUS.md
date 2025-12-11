@@ -1,4 +1,4 @@
-# AirTouch 3 Integration – Current Status (Dec 11, 2025)
+# AirTouch 3 Integration – Current Status (Dec 12, 2025)
 
 ## What's Working
 
@@ -11,35 +11,55 @@
 - **AC Fan Speed Select**: Dropdown with available fan speeds
   - Dynamic options based on AC's supported speeds
   - Correct encoding/decoding: Low=1, Medium=2, High=3, Powerful=4
+- **AC Temperature Sensor**: Current room temperature reading
 
 ### Zone Control
 - **Zone Switches**: ON/OFF toggle for each zone
-  - Uses damper position for state detection (< 100% = ON)
+  - Uses bit 7 of zone_data byte for ON/OFF state (matching Android app)
   - Optimistic updates with 5-second hold
   - Extra attributes: damper_percent, is_spill, active_program, sensor_source
+- **Zone Setpoint Number**: Adjust zone value (temperature or damper %)
+  - Dynamically switches between °C and % based on control mode
+  - Uses increment/decrement commands to reach target value
+- **Temp Control Switch**: Toggle between temperature and percentage modes
+  - Only appears for zones with temperature sensors
+  - ON = temperature setpoint mode, OFF = damper percentage mode
+- **Damper Sensor**: Shows current damper opening percentage
 
 ### Temperature Sensors
 - **Zone Temperature Sensors**: Per-zone temperature with source priority:
   1. Touchpad assigned to zone (if available)
   2. Wireless sensor 1 (slot = zone_number * 2)
   3. Wireless sensor 2 (slot = zone_number * 2 + 1)
+- **Sensor Detection**: Zones detect temperature capability from:
+  - Touchpad assignment (touchpad 1 or 2 assigned to zone)
+  - Wireless sensor availability (bit 7 of sensor bytes at slots zone*2 and zone*2+1)
 - **Parsing corrections**:
   - Touchpad: `byte & 0x7F` (bits 0-6)
   - Wireless: bit 7 = available, bit 6 = low battery, bits 0-5 = temperature
 
 ## Entity Structure
 
-After recent refactoring, the integration now uses:
+Zones are now represented as sub-devices for cleaner organization in Home Assistant:
 
-| Entity Type | Per | Description |
-|-------------|-----|-------------|
-| `switch` | Zone | Zone ON/OFF control |
-| `switch` | AC | AC power ON/OFF |
-| `select` | AC | AC mode (Auto/Heat/Cool/Dry/Fan) |
-| `select` | AC | AC fan speed |
-| `sensor` | Zone | Zone temperature (optional) |
+### Main Device (AirTouch 3)
+| Entity Type | Description |
+|-------------|-------------|
+| `switch` | AC power ON/OFF (per AC unit) |
+| `select` | AC mode (Auto/Heat/Cool/Dry/Fan) |
+| `select` | AC fan speed |
+| `sensor` | AC room temperature |
 
-**Note**: The `climate` entity was removed in favor of simpler switch/select entities because the AirTouch 3 doesn't fit the standard HVAC model well (separate power toggle, temperature in steps only, per-zone temperature control).
+### Zone Sub-Devices
+| Entity Type | Description |
+|-------------|-------------|
+| `switch` | Zone power ON/OFF |
+| `switch` | Temp Control mode toggle (zones with sensors only) |
+| `number` | Zone setpoint (°C or %) |
+| `sensor` | Zone temperature |
+| `sensor` | Zone damper percentage |
+
+**Note**: The `climate` entity was removed in favor of simpler switch/select/number entities because the AirTouch 3 doesn't fit the standard HVAC model well (separate power toggle, temperature in steps only, per-zone temperature control).
 
 ## Key Protocol Discoveries
 
@@ -72,21 +92,28 @@ After recent refactoring, the integration now uses:
 
 ## Files Modified
 
-- `client.py` - Protocol parsing with corrected bit masks
-- `switch.py` - Zone switches + AC power switch with optimistic updates
-- `select.py` - NEW: AC mode and fan speed select entities
-- `sensor.py` - Zone temperature sensors with source priority
+- `client.py` - Protocol parsing with corrected bit masks, zone control commands
+- `switch.py` - Zone switches + AC power switch + Temp Control mode switch with optimistic updates
+- `select.py` - AC mode and fan speed select entities
+- `sensor.py` - Zone temperature and damper sensors with source priority
+- `number.py` - Zone setpoint control (temperature or damper %)
+- `models.py` - Added `temperature_control` and `has_sensor` fields to ZoneState
+- `const.py` - Added zone command constants
 - `coordinator.py` - Uses `refresh_state()` for fresh data
-- `__init__.py` - Platform setup (switch, select, sensor)
+- `__init__.py` - Platform setup (switch, select, sensor, number)
+
+## Known Issues
+
+- **State inconsistencies**: Toggle commands sometimes don't take effect, possibly due to timing or protocol quirks. May need retry logic or adjusted optimistic hold periods.
+- **Toggle protocol challenges**: The AirTouch 3 uses toggle commands rather than explicit on/off, which can cause issues if state gets out of sync.
 
 ## Future Improvements
 
 ### Potential Additions
-- [ ] Per-zone temperature setpoint control (requires temp step commands)
 - [ ] AC timer configuration entities
 - [ ] Program/schedule configuration
 - [ ] Favorite scene activation
-- [ ] Damper percentage control (cover entity?)
+- [ ] Retry logic for failed toggle commands
 
 ### Nice to Have
 - [ ] Submit icons to HA brands repo for HACS tile display

@@ -449,12 +449,25 @@ class AirTouch3Client:
 
             feedback = data[const.OFFSET_ZONE_FEEDBACK + data_index]
             sensor_source = (feedback >> 5) & 0x07
-            # Zone has temperature capability if:
-            # 1. It has a wireless sensor assigned (sensor_source > 0), OR
-            # 2. It has a touchpad assigned (touchpad1 or touchpad2 points to this zone)
-            has_touchpad = (touchpad1_zone == zone_num) or (touchpad2_zone == zone_num)
-            has_sensor = sensor_source > 0 or has_touchpad
             setpoint = (feedback & 0x1F) + 1 if sensor_source > 0 else None
+
+            # Zone has temperature capability if ANY of these are true:
+            # 1. Touchpad 1 or 2 is assigned to this zone
+            # 2. Wireless sensor slot (zone_num * 2) is available
+            # 3. Wireless sensor slot (zone_num * 2 + 1) is available
+            # This matches Android app's CalculateGroupTemp logic
+            has_touchpad = (touchpad1_zone == zone_num) or (touchpad2_zone == zone_num)
+            sensor1_slot = zone_num * 2
+            sensor2_slot = zone_num * 2 + 1
+            has_wireless_sensor1 = (
+                sensor1_slot < const.STATE_SENSOR_SLOTS
+                and bool(data[const.OFFSET_WIRELESS_SENSORS + sensor1_slot] & 0x80)
+            )
+            has_wireless_sensor2 = (
+                sensor2_slot < const.STATE_SENSOR_SLOTS
+                and bool(data[const.OFFSET_WIRELESS_SENSORS + sensor2_slot] & 0x80)
+            )
+            has_sensor = has_touchpad or has_wireless_sensor1 or has_wireless_sensor2
 
             zones.append(
                 ZoneState(
@@ -473,7 +486,7 @@ class AirTouch3Client:
             )
             if LOGGER.isEnabledFor(logging.DEBUG):
                 LOGGER.debug(
-                    "Zone %s (group %s -> data %s): zone_data=0x%02x on=%s, damper_byte=0x%02x (%s%%) temp_ctrl=%s, feedback=0x%02x sensor_src=%s has_touchpad=%s has_sensor=%s",
+                    "Zone %s (group %s -> data %s): zone_data=0x%02x on=%s, damper_byte=0x%02x (%s%%) temp_ctrl=%s, feedback=0x%02x sensor_src=%s has_touchpad=%s has_wireless=%s/%s has_sensor=%s",
                     name or zone_num,
                     zone_num,
                     data_index,
@@ -485,6 +498,8 @@ class AirTouch3Client:
                     feedback,
                     sensor_source,
                     has_touchpad,
+                    has_wireless_sensor1,
+                    has_wireless_sensor2,
                     has_sensor,
                 )
 
