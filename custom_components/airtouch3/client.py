@@ -285,6 +285,7 @@ class AirTouch3Client:
 
     def _parse_state(self, data: bytes) -> SystemState:
         """Parse 492-byte state message into a SystemState."""
+        LOGGER.debug("Parsing state message (%d bytes)", len(data))
         device_id = "".join(str(data[i] & 0x0F) for i in range(const.OFFSET_DEVICE_ID, const.OFFSET_DEVICE_ID + 8))
         system_name = bytes(
             data[const.OFFSET_SYSTEM_NAME : const.OFFSET_SYSTEM_NAME + const.STATE_SYSTEM_NAME_LENGTH]
