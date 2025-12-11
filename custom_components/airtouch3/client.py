@@ -435,9 +435,9 @@ class AirTouch3Client:
         sensors: list[SensorState] = []
         for sensor_index in range(const.STATE_SENSOR_SLOTS):
             raw = data[const.OFFSET_WIRELESS_SENSORS + sensor_index]
-            available = bool(raw & 0x01)
-            low_battery = bool(raw & 0x02)
-            # Temperature is in bits 0-5 (mask 0x3F)
+            # Bit 7 = available, bit 6 = low battery, bits 0-5 = temperature
+            available = bool(raw & 0x80)
+            low_battery = bool(raw & 0x40)
             temperature = raw & 0x3F
             sensors.append(
                 SensorState(
