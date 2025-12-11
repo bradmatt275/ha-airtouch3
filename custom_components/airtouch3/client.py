@@ -527,7 +527,13 @@ class AirTouch3Client:
         return list(modes)
 
     def _decode_fan_speed(self, value: int, brand: int, supported: int) -> FanSpeed:
-        """Decode fan speed from state value."""
+        """Decode fan speed from state value.
+
+        Based on app's ACInfo.formatFanSpeed():
+        - 0 = Auto, 1 = Low, 2 = Medium, 3 = High, 4 = Powerful
+        - Brand 15: value 4 = Auto
+        - Brand 2 with supported=4: use value-1 as index
+        """
         if brand == const.BRAND_REMAP_15 and value == 4:
             return FanSpeed.AUTO
         if value == 0 or value >= 5:
@@ -537,23 +543,29 @@ class AirTouch3Client:
             value = max(1, value - 1)
 
         mapping = {
-            1: FanSpeed.QUIET,
-            2: FanSpeed.LOW,
-            3: FanSpeed.MEDIUM,
-            4: FanSpeed.HIGH,
+            1: FanSpeed.LOW,
+            2: FanSpeed.MEDIUM,
+            3: FanSpeed.HIGH,
+            4: FanSpeed.POWERFUL,
         }
         return mapping.get(value, FanSpeed.AUTO)
 
     def _encode_fan_speed(self, speed: FanSpeed, brand: int, supported: int) -> int:
-        """Encode fan speed command value."""
+        """Encode fan speed command value.
+
+        Based on app's ACInfo.formatFanSpeed():
+        - Low = 1, Medium = 2, High = 3, Powerful = 4
+        - Brand 15: Auto = 4, otherwise Auto = 0
+        - Brand 2 with supported=4: add 1 to value
+        """
         if speed == FanSpeed.AUTO:
             return 4 if brand == const.BRAND_REMAP_15 else 0
 
         value_map = {
-            FanSpeed.QUIET: 1,
-            FanSpeed.LOW: 2,
-            FanSpeed.MEDIUM: 3,
-            FanSpeed.HIGH: 4,
+            FanSpeed.QUIET: 1,  # Treated same as Low for brands without Quiet
+            FanSpeed.LOW: 1,
+            FanSpeed.MEDIUM: 2,
+            FanSpeed.HIGH: 3,
             FanSpeed.POWERFUL: 4,
         }
         value = value_map.get(speed, 0)

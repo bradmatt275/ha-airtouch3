@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from homeassistant.components.climate import (
@@ -13,7 +14,7 @@ from homeassistant.components.climate import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -21,6 +22,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, MAX_TEMP, MIN_TEMP, TEMP_STEP
 from .coordinator import AirTouch3Coordinator
 from .models import AcMode, AcState, FanSpeed
+
+# Ignore coordinator updates for this many seconds after a command
+OPTIMISTIC_HOLD_SECONDS = 5.0
 
 HA_MODE_MAP = {
     AcMode.AUTO: HVACMode.AUTO,
@@ -65,10 +69,37 @@ class AirTouch3Climate(CoordinatorEntity[AirTouch3Coordinator], ClimateEntity):
         super().__init__(coordinator)
         self.ac_number = ac_number
         self._attr_name = coordinator.data.ac_units[ac_number].name
+        self._optimistic_power: bool | None = None
+        self._optimistic_mode: AcMode | None = None
+        self._optimistic_until: float = 0.0
 
     @property
     def _ac_state(self) -> AcState:
         return self.coordinator.data.ac_units[self.ac_number]
+
+    def _is_optimistic_active(self) -> bool:
+        """Check if optimistic state is still active."""
+        return time.monotonic() < self._optimistic_until
+
+    def _clear_optimistic(self) -> None:
+        """Clear optimistic state."""
+        self._optimistic_power = None
+        self._optimistic_mode = None
+        self._optimistic_until = 0.0
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator."""
+        if self._is_optimistic_active():
+            # Check if coordinator now agrees with our optimistic state
+            ac = self._ac_state
+            power_matches = self._optimistic_power is None or ac.power_on == self._optimistic_power
+            mode_matches = self._optimistic_mode is None or ac.mode == self._optimistic_mode
+            if power_matches and mode_matches:
+                self._clear_optimistic()
+        else:
+            self._clear_optimistic()
+        super()._handle_coordinator_update()
 
     @property
     def supported_features(self) -> ClimateEntityFeature:
@@ -88,6 +119,13 @@ class AirTouch3Climate(CoordinatorEntity[AirTouch3Coordinator], ClimateEntity):
     @property
     def hvac_mode(self) -> HVACMode:
         """Return current mode."""
+        # Use optimistic state if active
+        if self._is_optimistic_active():
+            if self._optimistic_power is False:
+                return HVACMode.OFF
+            if self._optimistic_mode is not None:
+                return HA_MODE_MAP.get(self._optimistic_mode, HVACMode.AUTO)
+
         ac = self._ac_state
         if not ac.power_on:
             return HVACMode.OFF
@@ -134,15 +172,25 @@ class AirTouch3Climate(CoordinatorEntity[AirTouch3Coordinator], ClimateEntity):
         ac = self._ac_state
         if hvac_mode == HVACMode.OFF:
             if ac.power_on:
+                # Set optimistic state before sending command
+                self._optimistic_power = False
+                self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
+                self.async_write_ha_state()
                 await self.coordinator.client.ac_power_toggle(self.ac_number)
                 await self.coordinator.async_request_refresh()
             return
+
+        # Set optimistic state for mode change
+        target_mode = self._hvac_to_ac_mode(hvac_mode)
+        self._optimistic_power = True
+        self._optimistic_mode = target_mode
+        self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
+        self.async_write_ha_state()
 
         # Ensure device is on before setting mode
         if not ac.power_on:
             await self.coordinator.client.ac_power_toggle(self.ac_number)
 
-        target_mode = self._hvac_to_ac_mode(hvac_mode)
         await self.coordinator.client.ac_set_mode(self.ac_number, target_mode)
         await self.coordinator.async_request_refresh()
 
@@ -165,12 +213,20 @@ class AirTouch3Climate(CoordinatorEntity[AirTouch3Coordinator], ClimateEntity):
     async def async_turn_on(self) -> None:
         """Turn AC on."""
         if not self._ac_state.power_on:
+            # Set optimistic state before sending command
+            self._optimistic_power = True
+            self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
+            self.async_write_ha_state()
             await self.coordinator.client.ac_power_toggle(self.ac_number)
             await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self) -> None:
         """Turn AC off."""
         if self._ac_state.power_on:
+            # Set optimistic state before sending command
+            self._optimistic_power = False
+            self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
+            self.async_write_ha_state()
             await self.coordinator.client.ac_power_toggle(self.ac_number)
             await self.coordinator.async_request_refresh()
 
