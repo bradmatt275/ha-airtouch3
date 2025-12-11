@@ -354,13 +354,12 @@ class AirTouch3Client:
             damper_percent = min(100, damper_value * 5)
 
             # Zone data (per protocol): bit0 on/off, bit1 spill, bits2-4 program.
-            low_on = bool(zone_data & 0x01)
-            low_spill = bool(zone_data & 0x02)
+            # Note: low-bit flags (bit0, bit1) are noisy and toggle between frames.
+            # Use only high-bit flags for stable state detection.
             high_on = bool(zone_data & 0x80)
             high_spill = bool(zone_data & 0x40)
-            # Heuristic: treat zone as on if any flag says on OR damper is not fully open.
-            is_on = high_on or low_on or damper_percent < 95
-            is_spill = low_spill or high_spill
+            is_on = high_on
+            is_spill = high_spill
             active_program = (zone_data >> 2) & 0x07
 
             feedback = data[const.OFFSET_ZONE_FEEDBACK + data_index]
