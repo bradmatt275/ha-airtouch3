@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -18,6 +19,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import AirTouch3Coordinator
+
+LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -105,17 +108,29 @@ class AirTouch3ZoneTemperatureSensor(CoordinatorEntity[AirTouch3Coordinator], Se
         # Check touchpad 1 (assigned_zone is 0-indexed, -1 means unassigned)
         tp1 = data.touchpads[0]
         if tp1.assigned_zone == self.zone_number and tp1.temperature is not None and tp1.temperature > 0:
+            LOGGER.debug(
+                "Zone %d: Using touchpad1, temp=%d",
+                self.zone_number, tp1.temperature
+            )
             return tp1.temperature, "touchpad1", False
 
         # Check touchpad 2
         tp2 = data.touchpads[1]
         if tp2.assigned_zone == self.zone_number and tp2.temperature is not None and tp2.temperature > 0:
+            LOGGER.debug(
+                "Zone %d: Using touchpad2, temp=%d",
+                self.zone_number, tp2.temperature
+            )
             return tp2.temperature, "touchpad2", False
 
         # Check wireless sensor 1 for this zone (slot = zone_number * 2)
         sensor1_index = self.zone_number * 2
         if sensor1_index < len(data.sensors):
             sensor1 = data.sensors[sensor1_index]
+            LOGGER.debug(
+                "Zone %d: Checking sensor slot %d, available=%s, temp=%d",
+                self.zone_number, sensor1_index, sensor1.available, sensor1.temperature
+            )
             if sensor1.available:
                 return sensor1.temperature, f"wireless_{sensor1_index + 1}", sensor1.low_battery
 
@@ -123,9 +138,14 @@ class AirTouch3ZoneTemperatureSensor(CoordinatorEntity[AirTouch3Coordinator], Se
         sensor2_index = self.zone_number * 2 + 1
         if sensor2_index < len(data.sensors):
             sensor2 = data.sensors[sensor2_index]
+            LOGGER.debug(
+                "Zone %d: Checking sensor slot %d, available=%s, temp=%d",
+                self.zone_number, sensor2_index, sensor2.available, sensor2.temperature
+            )
             if sensor2.available:
                 return sensor2.temperature, f"wireless_{sensor2_index + 1}", sensor2.low_battery
 
+        LOGGER.debug("Zone %d: No temperature source found", self.zone_number)
         return None, None, False
 
     @property
