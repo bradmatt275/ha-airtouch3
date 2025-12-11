@@ -351,8 +351,9 @@ class AirTouch3Client:
             data_index = group_index if 0 <= group_index < const.STATE_ZONE_MAX else zone_num
 
             zone_data = data[const.OFFSET_ZONE_DATA + data_index]
-            is_on = bool(zone_data & 0x01)
-            is_spill = bool(zone_data & 0x02)
+            # App treats the MSB as the on flag and next bit as spill (toFullBinaryString substring(0,1)/(1,2))
+            is_on = bool(zone_data & 0x80)
+            is_spill = bool(zone_data & 0x40)
             active_program = (zone_data >> 2) & 0x07
 
             damper_value = data[const.OFFSET_ZONE_DAMPER + data_index] & 0x7F
