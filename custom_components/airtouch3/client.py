@@ -346,7 +346,10 @@ class AirTouch3Client:
 
             group_byte = data[const.OFFSET_GROUP_DATA + zone_num]
             group_index = (group_byte >> 4) & 0x0F  # app uses high nibble (bits 4-7)
-            data_index = (group_byte >> 4) & 0x0F
+            high_index = (group_byte >> 4) & 0x0F
+            low_index = group_byte & 0x0F
+            # Prefer high-nibble mapping; fall back to low nibble if high is zero/out of range.
+            data_index = high_index if 0 <= high_index < const.STATE_ZONE_MAX else low_index
             if not (0 <= data_index < const.STATE_ZONE_MAX):
                 data_index = zone_num
 
@@ -382,10 +385,12 @@ class AirTouch3Client:
             )
             if LOGGER.isEnabledFor(logging.DEBUG):
                 LOGGER.debug(
-                    "Zone %s (group %s -> data %s, group_byte=0x%02x, zone_data=0x%02x high_on=%s low_on=%s high_spill=%s low_spill=%s): on=%s spill=%s damper_raw=%s (%s%%) feedback=0x%02x",
+                    "Zone %s (group %s -> data %s (hi=%s lo=%s), group_byte=0x%02x, zone_data=0x%02x high_on=%s low_on=%s high_spill=%s low_spill=%s): on=%s spill=%s damper_raw=%s (%s%%) feedback=0x%02x",
                     name or zone_num,
                     zone_num,
                     data_index,
+                    high_index,
+                    low_index,
                     group_byte,
                     zone_data,
                     high_on,
