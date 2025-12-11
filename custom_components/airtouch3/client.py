@@ -354,7 +354,10 @@ class AirTouch3Client:
             # Use high-bit flags (matches app binary-string usage in the app).
             high_on = bool(zone_data & 0x80)
             high_spill = bool(zone_data & 0x40)
-            is_on = high_on
+            low_on = bool(zone_data & 0x01)
+            low_spill = bool(zone_data & 0x02)
+            # Heuristic: consider zone on if any flag says on or damper is not fully open (device reports 100% when off)
+            is_on = high_on or low_on or damper_percent < 100
             is_spill = high_spill
             active_program = (zone_data >> 2) & 0x07
 
