@@ -154,16 +154,18 @@ class AirTouch3AcPowerSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEnti
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from coordinator."""
+        # Only clear optimistic state when hold period expires
+        # Don't clear early on match - protocol data can bounce
         if self._optimistic_state is not None:
             if time.monotonic() >= self._optimistic_until:
-                self._optimistic_state = None
-            elif self._ac_state.power_on == self._optimistic_state:
                 self._optimistic_state = None
         super()._handle_coordinator_update()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn AC on."""
-        if not self._ac_state.power_on:
+        # Always send toggle if user wants ON and we're showing OFF
+        # Don't trust _ac_state.power_on as protocol data can be unreliable
+        if not self.is_on:
             self._optimistic_state = True
             self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
             self.async_write_ha_state()
@@ -172,7 +174,9 @@ class AirTouch3AcPowerSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEnti
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn AC off."""
-        if self._ac_state.power_on:
+        # Always send toggle if user wants OFF and we're showing ON
+        # Don't trust _ac_state.power_on as protocol data can be unreliable
+        if self.is_on:
             self._optimistic_state = False
             self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
             self.async_write_ha_state()
