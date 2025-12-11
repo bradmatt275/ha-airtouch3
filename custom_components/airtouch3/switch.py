@@ -1,11 +1,11 @@
-"""Zone switch entities for AirTouch 3."""
+"""Switch entities for AirTouch 3."""
 
 from __future__ import annotations
 
 import time
 from typing import Any
 
-from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.switch import SwitchEntity, SwitchDeviceClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -14,7 +14,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import AirTouch3Coordinator
-from .models import ZoneState
+from .models import AcState, ZoneState
 
 # Ignore coordinator updates for this many seconds after a toggle command
 OPTIMISTIC_HOLD_SECONDS = 5.0
@@ -23,9 +23,18 @@ OPTIMISTIC_HOLD_SECONDS = 5.0
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up zone switch entities."""
+    """Set up switch entities."""
     coordinator: AirTouch3Coordinator = hass.data[DOMAIN][entry.entry_id]
-    entities = [AirTouch3ZoneSwitch(coordinator, zone.zone_number) for zone in coordinator.data.zones]
+    entities: list[SwitchEntity] = []
+
+    # Zone switches
+    for zone in coordinator.data.zones:
+        entities.append(AirTouch3ZoneSwitch(coordinator, zone.zone_number))
+
+    # AC power switches
+    for ac in coordinator.data.ac_units:
+        entities.append(AirTouch3AcPowerSwitch(coordinator, ac.ac_number))
+
     async_add_entities(entities)
 
 
@@ -103,6 +112,77 @@ class AirTouch3ZoneSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEntity)
     def unique_id(self) -> str:
         """Unique ID for zone."""
         return f"{self.coordinator.data.device_id}_zone_{self.zone_number}"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Device registry info."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.data.device_id)},
+            name=self.coordinator.data.system_name,
+            manufacturer="Polyaire",
+            model="AirTouch 3",
+        )
+
+
+class AirTouch3AcPowerSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEntity):
+    """Power switch for an AirTouch 3 AC unit."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SwitchDeviceClass.SWITCH
+
+    def __init__(self, coordinator: AirTouch3Coordinator, ac_number: int) -> None:
+        """Initialize AC power switch."""
+        super().__init__(coordinator)
+        self.ac_number = ac_number
+        ac_name = coordinator.data.ac_units[ac_number].name
+        self._attr_name = f"{ac_name} Power"
+        self._optimistic_state: bool | None = None
+        self._optimistic_until: float = 0.0
+
+    @property
+    def _ac_state(self) -> AcState:
+        return self.coordinator.data.ac_units[self.ac_number]
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if AC is on."""
+        if self._optimistic_state is not None and time.monotonic() < self._optimistic_until:
+            return self._optimistic_state
+        self._optimistic_state = None
+        return self._ac_state.power_on
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator."""
+        if self._optimistic_state is not None:
+            if time.monotonic() >= self._optimistic_until:
+                self._optimistic_state = None
+            elif self._ac_state.power_on == self._optimistic_state:
+                self._optimistic_state = None
+        super()._handle_coordinator_update()
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn AC on."""
+        if not self._ac_state.power_on:
+            self._optimistic_state = True
+            self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
+            self.async_write_ha_state()
+            await self.coordinator.client.ac_power_toggle(self.ac_number)
+            await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn AC off."""
+        if self._ac_state.power_on:
+            self._optimistic_state = False
+            self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
+            self.async_write_ha_state()
+            await self.coordinator.client.ac_power_toggle(self.ac_number)
+            await self.coordinator.async_request_refresh()
+
+    @property
+    def unique_id(self) -> str:
+        """Unique ID for AC power switch."""
+        return f"{self.coordinator.data.device_id}_ac_{self.ac_number}_power"
 
     @property
     def device_info(self) -> DeviceInfo:

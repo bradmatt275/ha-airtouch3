@@ -20,7 +20,7 @@ from .const import (
 )
 from .coordinator import AirTouch3Coordinator
 
-PLATFORMS: list[Platform] = [Platform.CLIMATE]
+PLATFORMS: list[Platform] = []
 LOGGER = logging.getLogger(__name__)
 
 
@@ -45,9 +45,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
-    platforms = [Platform.CLIMATE]
-    if include_zones:
-        platforms.append(Platform.SWITCH)
+    # Always include switch (for AC power and zones) and select (for AC mode/fan)
+    platforms = [Platform.SWITCH, Platform.SELECT]
     if include_sensors:
         platforms.append(Platform.SENSOR)
 
@@ -59,9 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     coordinator: AirTouch3Coordinator = hass.data[DOMAIN][entry.entry_id]
-    platforms = [Platform.CLIMATE]
-    if entry.options.get(CONF_INCLUDE_ZONES, DEFAULT_INCLUDE_ZONES):
-        platforms.append(Platform.SWITCH)
+    platforms = [Platform.SWITCH, Platform.SELECT]
     if entry.options.get(CONF_INCLUDE_SENSORS, DEFAULT_INCLUDE_SENSORS):
         platforms.append(Platform.SENSOR)
 

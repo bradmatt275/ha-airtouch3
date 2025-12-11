@@ -298,6 +298,11 @@ class AirTouch3Client:
             status = data[const.OFFSET_AC_STATUS + ac_num]
             power_on = bool(status & 0x01)
             has_error = bool(status & 0x02)
+            if LOGGER.isEnabledFor(logging.DEBUG):
+                LOGGER.debug(
+                    "AC %d: status_byte=0x%02x (%s), power_on=%s, has_error=%s",
+                    ac_num + 1, status, format(status, '08b'), power_on, has_error
+                )
 
             brand_id = data[const.OFFSET_AC_BRAND + ac_num]
             unit_id = data[const.OFFSET_AC_UNIT_ID + ac_num]
