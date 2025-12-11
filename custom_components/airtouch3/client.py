@@ -411,6 +411,15 @@ class AirTouch3Client:
                     temperature=temp_value if temp_value > 0 else None,
                 )
             )
+            if LOGGER.isEnabledFor(logging.DEBUG):
+                LOGGER.debug(
+                    "Touchpad %d: zone_assign=%d, temp_raw=0x%02x (%d), temp_value=%d",
+                    tp_index + 1,
+                    zone_assign,
+                    temp_raw,
+                    temp_raw,
+                    temp_value,
+                )
 
         sensors: list[SensorState] = []
         for sensor_index in range(const.STATE_SENSOR_SLOTS):
@@ -426,14 +435,31 @@ class AirTouch3Client:
                     temperature=temperature,
                 )
             )
+            if LOGGER.isEnabledFor(logging.DEBUG) and available:
+                LOGGER.debug(
+                    "Wireless Sensor %d: raw=0x%02x (%d), available=%s, low_battery=%s, temp=%d",
+                    sensor_index + 1,
+                    raw,
+                    raw,
+                    available,
+                    low_battery,
+                    temperature,
+                )
 
         if LOGGER.isEnabledFor(logging.DEBUG):
             zone_bytes = data[const.OFFSET_ZONE_DATA : const.OFFSET_ZONE_DATA + const.STATE_ZONE_MAX]
             group_bytes = data[const.OFFSET_GROUP_DATA : const.OFFSET_GROUP_DATA + const.STATE_ZONE_MAX]
+            touchpad_bytes = data[const.OFFSET_TOUCHPAD_ZONE : const.OFFSET_TOUCHPAD_ZONE + 4]
+            sensor_bytes = data[const.OFFSET_WIRELESS_SENSORS : const.OFFSET_WIRELESS_SENSORS + 16]
             LOGGER.debug(
                 "Zone data bytes: %s; Group data bytes: %s",
                 " ".join(f"{b:02x}" for b in zone_bytes),
                 " ".join(f"{b:02x}" for b in group_bytes),
+            )
+            LOGGER.debug(
+                "Touchpad bytes (443-446): %s; Sensor bytes (451-466): %s",
+                " ".join(f"{b:02x}" for b in touchpad_bytes),
+                " ".join(f"{b:02x}" for b in sensor_bytes),
             )
 
         return SystemState(
