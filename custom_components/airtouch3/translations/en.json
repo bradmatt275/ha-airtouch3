@@ -1,0 +1,71 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to AirTouch 3",
+        "description": "Enter the IP address of your AirTouch 3 device.",
+        "data": {
+          "host": "IP Address",
+          "port": "Port"
+        },
+        "data_description": {
+          "host": "Local IP address (e.g., 192.168.1.100)",
+          "port": "TCP port (default 8899)"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure AirTouch 3",
+        "description": "Update the connection details for your AirTouch 3 device.",
+        "data": {
+          "host": "IP Address",
+          "port": "Port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect. Check the IP address and ensure the device is powered on.",
+      "no_state": "Connected but received no data. The device may be busy - try again.",
+      "different_device": "This IP belongs to a different AirTouch 3 device.",
+      "unknown": "An unexpected error occurred. Check the logs for details."
+    },
+    "abort": {
+      "already_configured": "This AirTouch 3 device is already configured.",
+      "reconfigure_successful": "Connection updated successfully."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "AirTouch 3 Options",
+        "description": "Configure how the integration behaves.",
+        "data": {
+          "scan_interval": "Poll interval (seconds)",
+          "include_sensors": "Create temperature sensors",
+          "include_zones": "Create zone switches"
+        },
+        "data_description": {
+          "scan_interval": "How often to poll the device for updates (10-300 seconds)",
+          "include_sensors": "Create sensor entities for AC and zone temperatures",
+          "include_zones": "Create switch entities to control individual zones"
+        }
+      }
+    }
+  },
+  "entity": {
+    "climate": {
+      "airtouch3": {
+        "name": "AC {ac_number}"
+      }
+    },
+    "switch": {
+      "airtouch3_zone": {
+        "name": "{zone_name}"
+      }
+    },
+    "sensor": {
+      "temperature": {
+        "name": "{zone_name} Temperature"
+      }
+    }
+  }
+}
