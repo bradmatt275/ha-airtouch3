@@ -204,6 +204,66 @@ class AirTouch3Client:
         LOGGER.error("Failed to reach target damper %s", target_percent)
         return False
 
+    async def zone_value_up(self, zone_index: int) -> bool:
+        """Increase zone value (temperature or damper percent, depending on mode)."""
+        command = self._create_command(
+            const.CMD_ZONE, zone_index, const.ZONE_DAMPER_UP, const.ZONE_VALUE_ADJUST
+        )
+        return (await self._send_command(command)) is not None
+
+    async def zone_value_down(self, zone_index: int) -> bool:
+        """Decrease zone value (temperature or damper percent, depending on mode)."""
+        command = self._create_command(
+            const.CMD_ZONE, zone_index, const.ZONE_DAMPER_DOWN, const.ZONE_VALUE_ADJUST
+        )
+        return (await self._send_command(command)) is not None
+
+    async def zone_toggle_mode(self, zone_index: int) -> bool:
+        """Toggle zone between temperature and percentage control modes."""
+        command = self._create_command(
+            const.CMD_ZONE, zone_index, const.ZONE_TOGGLE, const.ZONE_MODE_TOGGLE
+        )
+        return (await self._send_command(command)) is not None
+
+    async def zone_set_value(self, zone_index: int, target: int, is_temperature: bool) -> bool:
+        """Set zone value (temperature or damper percent) via increment/decrement.
+
+        Args:
+            zone_index: Zone index
+            target: Target value (temperature in °C or damper percent)
+            is_temperature: True if setting temperature, False for damper percent
+        """
+        max_iterations = 25 if is_temperature else 25
+        for _ in range(max_iterations):
+            state = await self.get_state()
+            if state is None:
+                return False
+            if zone_index >= len(state.zones):
+                return False
+            zone = state.zones[zone_index]
+
+            # Get current value based on mode
+            if is_temperature:
+                if zone.setpoint is None:
+                    LOGGER.error("Zone %s has no temperature sensor", zone_index)
+                    return False
+                current = zone.setpoint
+            else:
+                current = zone.damper_percent
+
+            if current == target:
+                return True
+
+            if current < target:
+                if not await self.zone_value_up(zone_index):
+                    return False
+            else:
+                if not await self.zone_value_down(zone_index):
+                    return False
+
+        LOGGER.error("Failed to reach target value %s for zone %s", target, zone_index)
+        return False
+
     async def _send_ac_command(self, ac_num: int, subcommand: int, value: int) -> bool:
         """Send AC command message."""
         command = self._create_command(const.CMD_AC, ac_num, subcommand, value)
@@ -367,8 +427,11 @@ class AirTouch3Client:
                 data_index = zone_num
 
             zone_data = data[const.OFFSET_ZONE_DATA + data_index]
-            damper_value = data[const.OFFSET_ZONE_DAMPER + data_index] & 0x7F
+            damper_byte = data[const.OFFSET_ZONE_DAMPER + data_index]
+            damper_value = damper_byte & 0x7F
             damper_percent = min(100, damper_value * 5)
+            # Bit 7 of damper byte indicates temperature control mode (1=temp, 0=percent)
+            temperature_control = bool(damper_byte & 0x80)
 
             # Zone data bits (MSB-first as per Android app's toFullBinaryString):
             # - Bit 7 (0x80): Zone ON/OFF state (1=ON, 0=OFF)
@@ -381,7 +444,8 @@ class AirTouch3Client:
 
             feedback = data[const.OFFSET_ZONE_FEEDBACK + data_index]
             sensor_source = (feedback >> 5) & 0x07
-            setpoint = (feedback & 0x1F) + 1 if sensor_source > 0 else None
+            has_sensor = sensor_source > 0
+            setpoint = (feedback & 0x1F) + 1 if has_sensor else None
 
             zones.append(
                 ZoneState(
@@ -394,6 +458,8 @@ class AirTouch3Client:
                     active_program=active_program,
                     setpoint=setpoint,
                     sensor_source=sensor_source,
+                    temperature_control=temperature_control,
+                    has_sensor=has_sensor,
                 )
             )
             if LOGGER.isEnabledFor(logging.DEBUG):

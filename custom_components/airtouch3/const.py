@@ -44,6 +44,13 @@ ZONE_TOGGLE = 0x80
 ZONE_DAMPER_UP = 0x02
 ZONE_DAMPER_DOWN = 0x01
 
+# Zone command modifiers (byte 5)
+# When byte 5 = 0: Zone power toggle
+# When byte 5 = 1 with ZONE_TOGGLE: Toggle between temp/percent mode
+# When byte 5 = 1 with ZONE_DAMPER_UP/DOWN: Adjust value (temp or percent)
+ZONE_MODE_TOGGLE = 0x01
+ZONE_VALUE_ADJUST = 0x01
+
 # Brand handling
 BRAND_SPECIAL_FAN = 2
 BRAND_REMAP_11 = 11

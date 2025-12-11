@@ -216,20 +216,48 @@ Byte 1:  0x81  (129 unsigned, -127 signed)
 Byte 2:  0x0C
 Byte 3:  ZONE_NUM (0-based zone index)
 Byte 4:  0x80
-Byte 5-11: 0x00
+Byte 5:  0x00  (Zone power toggle)
+Byte 6-11: 0x00
 Byte 12: Checksum
 ```
 
-**Example (Toggle Zone 0):**
+**Example (Toggle Zone 0 power):**
 ```
 [0x55, 0x81, 0x0C, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, <checksum>]
 ```
 
 ---
 
-### 7. Zone Fan Speed Adjustment
+### 7. Zone Control Mode Toggle
 
-**Purpose:** Adjust zone damper opening (fan speed)
+**Purpose:** Toggle zone between temperature setpoint mode and damper percentage mode
+
+Only applicable to zones with temperature sensors. When in temperature mode, the zone maintains a target temperature. When in percentage mode, the zone uses a fixed damper opening.
+
+**Message Format:**
+```
+Byte 0:  0x55
+Byte 1:  0x81  (129 unsigned, -127 signed)
+Byte 2:  0x0C
+Byte 3:  ZONE_NUM (0-based zone index)
+Byte 4:  0x80
+Byte 5:  0x01  (Mode toggle - distinguishes from power toggle)
+Byte 6-11: 0x00
+Byte 12: Checksum
+```
+
+**Example (Toggle Zone 0 control mode):**
+```
+[0x55, 0x81, 0x0C, 0x00, 0x80, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, <checksum>]
+```
+
+**Note:** The current mode is indicated by bit 7 (0x80) of the damper byte (bytes 248-263). When set, the zone is in temperature control mode.
+
+---
+
+### 8. Zone Value Adjustment
+
+**Purpose:** Adjust zone value (temperature setpoint or damper percentage, depending on current mode)
 
 **Message Format:**
 ```
@@ -244,6 +272,9 @@ Byte 5:  0x01
 Byte 6-11: 0x00
 Byte 12: Checksum
 ```
+
+In **temperature mode**: Adjusts setpoint by 1°C per command
+In **percentage mode**: Adjusts damper opening by 5% per command
 
 ---
 
@@ -351,9 +382,16 @@ Each byte is a binary-encoded ASCII character.
 
 ### Zone Open/Damper Status (Bytes 248-263)
 
-16 bytes, one per zone. Each byte's bits 0-6 represent damper opening value:
+16 bytes, one per zone. Each byte contains:
+
+| Bit | Content |
+|-----|---------|
+| 7 | Temperature control mode (1=temperature, 0=percentage) |
+| 6-0 | Damper opening value (multiply by 5 for percentage) |
+
 - Parse bits 0-6 as `value = byte & 0x7F`
 - Multiply by 5 to get percentage (0-100%)
+- Bit 7 indicates whether the zone is in temperature setpoint mode (when a sensor is assigned)
 
 **Note:** Damper position indicates the airflow percentage, NOT the zone ON/OFF state. Use bit 7 of Zone Data (bytes 232-247) for ON/OFF. A zone that is OFF may retain its previous damper position.
 

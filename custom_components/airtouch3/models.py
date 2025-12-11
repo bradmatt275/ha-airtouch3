@@ -59,6 +59,8 @@ class ZoneState:
     active_program: int
     setpoint: Optional[int]
     sensor_source: int
+    temperature_control: bool  # True = temp setpoint mode, False = percentage mode
+    has_sensor: bool  # True if zone has a temperature sensor assigned
 
 
 @dataclass
