@@ -23,6 +23,28 @@ OPTIMISTIC_HOLD_SECONDS = 5.0
 AC_OPTIMISTIC_HOLD_SECONDS = 10.0
 
 
+def get_zone_device_info(coordinator: AirTouch3Coordinator, zone_number: int) -> DeviceInfo:
+    """Get device info for a zone sub-device."""
+    zone = coordinator.data.zones[zone_number]
+    return DeviceInfo(
+        identifiers={(DOMAIN, f"{coordinator.data.device_id}_zone_{zone_number}")},
+        name=zone.name,
+        manufacturer="Polyaire",
+        model="AirTouch 3 Zone",
+        via_device=(DOMAIN, coordinator.data.device_id),
+    )
+
+
+def get_main_device_info(coordinator: AirTouch3Coordinator) -> DeviceInfo:
+    """Get device info for the main AirTouch 3 device."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, coordinator.data.device_id)},
+        name=coordinator.data.system_name,
+        manufacturer="Polyaire",
+        model="AirTouch 3",
+    )
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -48,12 +70,12 @@ class AirTouch3ZoneSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEntity)
     """Switch for an AirTouch 3 zone."""
 
     _attr_has_entity_name = True
+    _attr_name = "Power"  # Device name already includes zone name
 
     def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
         """Initialize zone switch."""
         super().__init__(coordinator)
         self.zone_number = zone_number
-        self._attr_name = coordinator.data.zones[zone_number].name
         self._optimistic_state: bool | None = None
         self._optimistic_until: float = 0.0
 
@@ -117,17 +139,12 @@ class AirTouch3ZoneSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEntity)
     @property
     def unique_id(self) -> str:
         """Unique ID for zone."""
-        return f"{self.coordinator.data.device_id}_zone_{self.zone_number}"
+        return f"{self.coordinator.data.device_id}_zone_{self.zone_number}_power"
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Device registry info."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data.device_id)},
-            name=self.coordinator.data.system_name,
-            manufacturer="Polyaire",
-            model="AirTouch 3",
-        )
+        """Device registry info - zone sub-device."""
+        return get_zone_device_info(self.coordinator, self.zone_number)
 
 
 class AirTouch3AcPowerSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEntity):
@@ -196,13 +213,8 @@ class AirTouch3AcPowerSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEnti
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Device registry info."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data.device_id)},
-            name=self.coordinator.data.system_name,
-            manufacturer="Polyaire",
-            model="AirTouch 3",
-        )
+        """Device registry info - main device."""
+        return get_main_device_info(self.coordinator)
 
 
 class AirTouch3ZoneTempModeSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEntity):
@@ -214,13 +226,12 @@ class AirTouch3ZoneTempModeSwitch(CoordinatorEntity[AirTouch3Coordinator], Switc
     """
 
     _attr_has_entity_name = True
+    _attr_name = "Temp Control"  # Device name already includes zone name
 
     def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
         """Initialize zone temp mode switch."""
         super().__init__(coordinator)
         self.zone_number = zone_number
-        zone_name = coordinator.data.zones[zone_number].name
-        self._attr_name = f"{zone_name} Temp Control"
         self._optimistic_state: bool | None = None
         self._optimistic_until: float = 0.0
 
@@ -280,10 +291,5 @@ class AirTouch3ZoneTempModeSwitch(CoordinatorEntity[AirTouch3Coordinator], Switc
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Device registry info."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data.device_id)},
-            name=self.coordinator.data.system_name,
-            manufacturer="Polyaire",
-            model="AirTouch 3",
-        )
+        """Device registry info - zone sub-device."""
+        return get_zone_device_info(self.coordinator, self.zone_number)

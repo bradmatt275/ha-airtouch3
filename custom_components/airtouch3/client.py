@@ -414,6 +414,11 @@ class AirTouch3Client:
                 )
             )
 
+        # Parse touchpad assignments first (needed to determine has_sensor for zones)
+        # Touchpad zone assignment: value is 1-indexed zone number, 0 means unassigned
+        touchpad1_zone = data[const.OFFSET_TOUCHPAD_ZONE] - 1  # Convert to 0-indexed, -1 if unassigned
+        touchpad2_zone = data[const.OFFSET_TOUCHPAD_ZONE + 1] - 1
+
         zones: list[ZoneState] = []
         for zone_num in range(zone_count):
             name_start = const.OFFSET_ZONE_NAMES + (zone_num * const.STATE_ZONE_NAME_LENGTH)
@@ -444,8 +449,12 @@ class AirTouch3Client:
 
             feedback = data[const.OFFSET_ZONE_FEEDBACK + data_index]
             sensor_source = (feedback >> 5) & 0x07
-            has_sensor = sensor_source > 0
-            setpoint = (feedback & 0x1F) + 1 if has_sensor else None
+            # Zone has temperature capability if:
+            # 1. It has a wireless sensor assigned (sensor_source > 0), OR
+            # 2. It has a touchpad assigned (touchpad1 or touchpad2 points to this zone)
+            has_touchpad = (touchpad1_zone == zone_num) or (touchpad2_zone == zone_num)
+            has_sensor = sensor_source > 0 or has_touchpad
+            setpoint = (feedback & 0x1F) + 1 if sensor_source > 0 else None
 
             zones.append(
                 ZoneState(
@@ -464,17 +473,19 @@ class AirTouch3Client:
             )
             if LOGGER.isEnabledFor(logging.DEBUG):
                 LOGGER.debug(
-                    "Zone %s (group %s -> data %s, group_byte=0x%02x, zone_data=0x%02x): on=%s spill=%s damper_raw=%s (%s%%) feedback=0x%02x",
+                    "Zone %s (group %s -> data %s): zone_data=0x%02x on=%s, damper_byte=0x%02x (%s%%) temp_ctrl=%s, feedback=0x%02x sensor_src=%s has_touchpad=%s has_sensor=%s",
                     name or zone_num,
                     zone_num,
                     data_index,
-                    group_byte,
                     zone_data,
                     is_on,
-                    is_spill,
-                    damper_value,
+                    damper_byte,
                     damper_percent,
+                    temperature_control,
                     feedback,
+                    sensor_source,
+                    has_touchpad,
+                    has_sensor,
                 )
 
         touchpads: list[TouchpadState] = []

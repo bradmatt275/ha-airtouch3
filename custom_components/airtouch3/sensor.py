@@ -19,6 +19,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import AirTouch3Coordinator
+from .switch import get_zone_device_info, get_main_device_info
 
 LOGGER = logging.getLogger(__name__)
 
@@ -69,13 +70,8 @@ class AirTouch3AcTemperatureSensor(CoordinatorEntity[AirTouch3Coordinator], Sens
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Device registry info."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data.device_id)},
-            name=self.coordinator.data.system_name,
-            manufacturer="Polyaire",
-            model="AirTouch 3",
-        )
+        """Device registry info - main device."""
+        return get_main_device_info(self.coordinator)
 
 
 class AirTouch3ZoneTemperatureSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntity):
@@ -89,13 +85,12 @@ class AirTouch3ZoneTemperatureSensor(CoordinatorEntity[AirTouch3Coordinator], Se
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_has_entity_name = True
+    _attr_name = "Temperature"  # Device name already includes zone name
 
     def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
         """Initialize zone temperature sensor."""
         super().__init__(coordinator)
         self.zone_number = zone_number
-        zone_name = coordinator.data.zones[zone_number].name
-        self._attr_name = f"{zone_name} Temperature"
 
     def _get_temperature_and_source(self) -> tuple[int | None, str | None, bool]:
         """Get temperature value, source name, and low battery flag.
@@ -178,13 +173,8 @@ class AirTouch3ZoneTemperatureSensor(CoordinatorEntity[AirTouch3Coordinator], Se
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Device registry info."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data.device_id)},
-            name=self.coordinator.data.system_name,
-            manufacturer="Polyaire",
-            model="AirTouch 3",
-        )
+        """Device registry info - zone sub-device."""
+        return get_zone_device_info(self.coordinator, self.zone_number)
 
 
 class AirTouch3DamperSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntity):
@@ -193,12 +183,12 @@ class AirTouch3DamperSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntit
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_has_entity_name = True
+    _attr_name = "Damper"  # Device name already includes zone name
 
     def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
         """Initialize damper sensor."""
         super().__init__(coordinator)
         self.zone_number = zone_number
-        self._attr_name = f"{coordinator.data.zones[zone_number].name} Damper"
 
     @property
     def native_value(self) -> float | None:
@@ -212,10 +202,5 @@ class AirTouch3DamperSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntit
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Device registry info."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data.device_id)},
-            name=self.coordinator.data.system_name,
-            manufacturer="Polyaire",
-            model="AirTouch 3",
-        )
+        """Device registry info - zone sub-device."""
+        return get_zone_device_info(self.coordinator, self.zone_number)

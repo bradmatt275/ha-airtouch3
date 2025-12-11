@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, MIN_TEMP, MAX_TEMP
 from .coordinator import AirTouch3Coordinator
 from .models import ZoneState
+from .switch import get_zone_device_info
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,13 +44,12 @@ class AirTouch3ZoneValueNumber(CoordinatorEntity[AirTouch3Coordinator], NumberEn
 
     _attr_has_entity_name = True
     _attr_mode = NumberMode.BOX
+    _attr_name = "Setpoint"  # Device name already includes zone name
 
     def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
         """Initialize zone value number entity."""
         super().__init__(coordinator)
         self.zone_number = zone_number
-        zone = coordinator.data.zones[zone_number]
-        self._attr_name = f"{zone.name} Setpoint"
 
     @property
     def _zone_state(self) -> ZoneState:
@@ -137,14 +137,9 @@ class AirTouch3ZoneValueNumber(CoordinatorEntity[AirTouch3Coordinator], NumberEn
     @property
     def unique_id(self) -> str:
         """Return unique ID."""
-        return f"{self.coordinator.data.device_id}_zone_{self.zone_number}_value"
+        return f"{self.coordinator.data.device_id}_zone_{self.zone_number}_setpoint"
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Return device info."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data.device_id)},
-            name=self.coordinator.data.system_name,
-            manufacturer="Polyaire",
-            model="AirTouch 3",
-        )
+        """Return device info - zone sub-device."""
+        return get_zone_device_info(self.coordinator, self.zone_number)

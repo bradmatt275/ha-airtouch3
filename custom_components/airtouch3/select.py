@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import AirTouch3Coordinator
 from .models import AcMode, AcState, FanSpeed
+from .switch import get_main_device_info
 
 # Ignore coordinator updates for this many seconds after a command
 OPTIMISTIC_HOLD_SECONDS = 5.0
@@ -110,13 +111,8 @@ class AirTouch3AcModeSelect(CoordinatorEntity[AirTouch3Coordinator], SelectEntit
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Device registry info."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data.device_id)},
-            name=self.coordinator.data.system_name,
-            manufacturer="Polyaire",
-            model="AirTouch 3",
-        )
+        """Device registry info - main device."""
+        return get_main_device_info(self.coordinator)
 
 
 class AirTouch3AcFanSelect(CoordinatorEntity[AirTouch3Coordinator], SelectEntity):
@@ -178,10 +174,5 @@ class AirTouch3AcFanSelect(CoordinatorEntity[AirTouch3Coordinator], SelectEntity
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Device registry info."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data.device_id)},
-            name=self.coordinator.data.system_name,
-            manufacturer="Polyaire",
-            model="AirTouch 3",
-        )
+        """Device registry info - main device."""
+        return get_main_device_info(self.coordinator)
