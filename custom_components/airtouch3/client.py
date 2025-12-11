@@ -354,12 +354,12 @@ class AirTouch3Client:
             damper_value = data[const.OFFSET_ZONE_DAMPER + data_index] & 0x7F
             damper_percent = min(100, damper_value * 5)
 
-            # Use flags plus damper heuristic: device reports 100% damper when off.
+            # Treat zone as on if the high-bit on flag is set OR damper is not fully open.
+            # Damper is typically 100% when off and <80% when on.
             high_on = bool(zone_data & 0x80)
             high_spill = bool(zone_data & 0x40)
-            low_on = bool(zone_data & 0x01)
+            is_on = high_on or damper_percent < 95
             low_spill = bool(zone_data & 0x02)
-            is_on = high_on or low_on or damper_percent < 100
             is_spill = high_spill or low_spill
             active_program = (zone_data >> 2) & 0x07
 
