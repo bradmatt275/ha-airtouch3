@@ -346,11 +346,9 @@ class AirTouch3Client:
 
             group_byte = data[const.OFFSET_GROUP_DATA + zone_num]
             group_index = (group_byte >> 4) & 0x0F  # app uses high nibble (bits 4-7)
-            data_index = (
-                group_index
-                if 0 <= group_index < const.STATE_ZONE_MAX and group_index < zone_count
-                else zone_num
-            )
+            # Use the high-nibble group index even if it exceeds the configured zone count,
+            # because the device may expose additional slots in zone data.
+            data_index = group_index if 0 <= group_index < const.STATE_ZONE_MAX else zone_num
 
             zone_data = data[const.OFFSET_ZONE_DATA + data_index]
             is_on = bool(zone_data & 0x01)
