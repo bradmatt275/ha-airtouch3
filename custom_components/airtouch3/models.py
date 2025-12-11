@@ -51,6 +51,7 @@ class ZoneState:
     """State for a single zone."""
 
     zone_number: int
+    data_index: int
     name: str
     is_on: bool
     is_spill: bool
@@ -92,4 +93,3 @@ class SystemState:
     zones: List[ZoneState]
     sensors: List[SensorState]
     touchpads: List[TouchpadState]
-

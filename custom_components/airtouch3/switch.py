@@ -48,13 +48,13 @@ class AirTouch3ZoneSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEntity)
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn zone on, handling toggle protocol."""
         if not self._zone_state.is_on:
-            await self.coordinator.client.zone_toggle(self.zone_number)
+            await self.coordinator.client.zone_toggle(self._zone_state.data_index)
             await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn zone off, handling toggle protocol."""
         if self._zone_state.is_on:
-            await self.coordinator.client.zone_toggle(self.zone_number)
+            await self.coordinator.client.zone_toggle(self._zone_state.data_index)
             await self.coordinator.async_request_refresh()
 
     @property

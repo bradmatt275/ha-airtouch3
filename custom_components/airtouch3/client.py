@@ -169,25 +169,28 @@ class AirTouch3Client:
         LOGGER.error("Failed to reach target temperature %s", target)
         return False
 
-    async def zone_toggle(self, zone_num: int) -> bool:
+    async def zone_toggle(self, zone_index: int) -> bool:
         """Toggle zone on/off."""
-        command = self._create_command(const.CMD_ZONE, zone_num, const.ZONE_TOGGLE, 0)
+        command = self._create_command(const.CMD_ZONE, zone_index, const.ZONE_TOGGLE, 0)
         return (await self._send_command(command)) is not None
 
-    async def zone_set_damper(self, zone_num: int, target_percent: int) -> bool:
+    async def zone_set_damper(self, zone_index: int, target_percent: int) -> bool:
         """Adjust damper via increment/decrement commands."""
         target = min(100, max(0, target_percent))
         for _ in range(25):
             state = await self.get_state()
             if state is None:
                 return False
-            current = state.zones[zone_num].damper_percent
+            zone_state = next((z for z in state.zones if z.data_index == zone_index), None)
+            if zone_state is None:
+                return False
+            current = zone_state.damper_percent
             if current == target:
                 return True
             if current < target:
-                cmd = self._create_command(const.CMD_ZONE, zone_num, const.ZONE_DAMPER_UP, 1)
+                cmd = self._create_command(const.CMD_ZONE, zone_index, const.ZONE_DAMPER_UP, 1)
             else:
-                cmd = self._create_command(const.CMD_ZONE, zone_num, const.ZONE_DAMPER_DOWN, 1)
+                cmd = self._create_command(const.CMD_ZONE, zone_index, const.ZONE_DAMPER_DOWN, 1)
             if await self._send_command(cmd) is None:
                 return False
         LOGGER.error("Failed to reach target damper %s", target_percent)
@@ -342,21 +345,25 @@ class AirTouch3Client:
                 data[name_start : name_start + const.STATE_ZONE_NAME_LENGTH]
             ).decode("ascii", errors="ignore").strip()
 
-            zone_data = data[const.OFFSET_ZONE_DATA + zone_num]
+            group_index = data[const.OFFSET_GROUP_DATA + zone_num] & 0x0F
+            data_index = group_index if group_index < const.STATE_ZONE_MAX else zone_num
+
+            zone_data = data[const.OFFSET_ZONE_DATA + data_index]
             is_on = bool(zone_data & 0x01)
             is_spill = bool(zone_data & 0x02)
             active_program = (zone_data >> 2) & 0x07
 
-            damper_value = data[const.OFFSET_ZONE_DAMPER + zone_num] & 0x7F
+            damper_value = data[const.OFFSET_ZONE_DAMPER + data_index] & 0x7F
             damper_percent = min(100, damper_value * 5)
 
-            feedback = data[const.OFFSET_ZONE_FEEDBACK + zone_num]
+            feedback = data[const.OFFSET_ZONE_FEEDBACK + data_index]
             sensor_source = (feedback >> 5) & 0x07
             setpoint = (feedback & 0x1F) + 1 if sensor_source > 0 else None
 
             zones.append(
                 ZoneState(
                     zone_number=zone_num,
+                    data_index=data_index,
                     name=name or f"Zone {zone_num + 1}",
                     is_on=is_on,
                     is_spill=is_spill,
@@ -366,6 +373,18 @@ class AirTouch3Client:
                     sensor_source=sensor_source,
                 )
             )
+            if LOGGER.isEnabledFor(logging.DEBUG):
+                LOGGER.debug(
+                    "Zone %s (group %s -> data %s): on=%s spill=%s damper_raw=%s (%s%%) feedback=0x%02x",
+                    name or zone_num,
+                    zone_num,
+                    data_index,
+                    is_on,
+                    is_spill,
+                    damper_value,
+                    damper_percent,
+                    feedback,
+                )
 
         touchpads: list[TouchpadState] = []
         for tp_index in range(const.STATE_TOUCHPAD_COUNT):
