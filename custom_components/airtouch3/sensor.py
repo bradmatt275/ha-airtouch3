@@ -27,91 +27,134 @@ async def async_setup_entry(
     coordinator: AirTouch3Coordinator = hass.data[DOMAIN][entry.entry_id]
     entities: list[SensorEntity] = []
 
-    # AC room temperatures
+    # AC unit temperatures
     for ac in coordinator.data.ac_units:
-        entities.append(AirTouch3TemperatureSensor(coordinator, "ac", ac.ac_number))
+        entities.append(AirTouch3AcTemperatureSensor(coordinator, ac.ac_number))
 
-    # Zone damper percentage
+    # Zone damper percentage and temperature
     for zone in coordinator.data.zones:
         entities.append(AirTouch3DamperSensor(coordinator, zone.zone_number))
-
-    # Touchpad temperatures
-    for touchpad in coordinator.data.touchpads:
-        entities.append(AirTouch3TemperatureSensor(coordinator, "touchpad", touchpad.touchpad_number - 1))
-
-    # Wireless sensors (create for all slots so availability updates)
-    for index in range(len(coordinator.data.sensors)):
-        entities.append(AirTouch3TemperatureSensor(coordinator, "wireless", index))
+        entities.append(AirTouch3ZoneTemperatureSensor(coordinator, zone.zone_number))
 
     async_add_entities(entities)
 
 
-class AirTouch3TemperatureSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntity):
-    """Temperature sensor for AC, touchpad, or wireless sensor."""
+class AirTouch3AcTemperatureSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntity):
+    """Temperature sensor for an AC unit."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_has_entity_name = True
 
-    def __init__(self, coordinator: AirTouch3Coordinator, kind: str, index: int) -> None:
-        """Initialize temperature sensor."""
+    def __init__(self, coordinator: AirTouch3Coordinator, ac_number: int) -> None:
+        """Initialize AC temperature sensor."""
         super().__init__(coordinator)
-        self.kind = kind
-        self.index = index
-        self._attr_has_entity_name = True
-        if kind == "ac":
-            name = coordinator.data.ac_units[index].name
-            self._attr_name = f"{name} Temperature"
-        elif kind == "touchpad":
-            self._attr_name = f"Touchpad {index + 1} Temperature"
-        else:
-            self._attr_name = f"Wireless Sensor {index + 1} Temperature"
+        self.ac_number = ac_number
+        name = coordinator.data.ac_units[ac_number].name
+        self._attr_name = f"{name} Temperature"
 
     @property
     def native_value(self) -> float | None:
         """Return temperature value."""
-        if self.kind == "ac":
-            value = self.coordinator.data.ac_units[self.index].room_temp
-            return float(value)
-
-        if self.kind == "touchpad":
-            touchpad = self.coordinator.data.touchpads[self.index]
-            return float(touchpad.temperature) if touchpad.temperature is not None else None
-
-        sensor = self.coordinator.data.sensors[self.index]
-        if not sensor.available:
-            return None
-        return float(sensor.temperature)
-
-    @property
-    def available(self) -> bool:
-        """Return availability."""
-        if self.kind == "wireless":
-            return self.coordinator.data.sensors[self.index].available
-        if self.kind == "touchpad":
-            return self.coordinator.data.touchpads[self.index].temperature is not None
-        return True
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return extra attributes."""
-        if self.kind == "wireless":
-            sensor = self.coordinator.data.sensors[self.index]
-            return {"low_battery": sensor.low_battery}
-        if self.kind == "touchpad":
-            touchpad = self.coordinator.data.touchpads[self.index]
-            return {"assigned_zone": touchpad.assigned_zone}
-        return {}
+        return float(self.coordinator.data.ac_units[self.ac_number].room_temp)
 
     @property
     def unique_id(self) -> str:
         """Return unique ID."""
-        base = self.coordinator.data.device_id
-        if self.kind == "ac":
-            return f"{base}_ac_{self.index}_temperature"
-        if self.kind == "touchpad":
-            return f"{base}_touchpad_{self.index + 1}_temperature"
-        return f"{base}_wireless_{self.index + 1}_temperature"
+        return f"{self.coordinator.data.device_id}_ac_{self.ac_number}_temperature"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Device registry info."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.data.device_id)},
+            name=self.coordinator.data.system_name,
+            manufacturer="Polyaire",
+            model="AirTouch 3",
+        )
+
+
+class AirTouch3ZoneTemperatureSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntity):
+    """Temperature sensor for a zone.
+
+    Follows the app logic: touchpad takes priority, then wireless sensor 1,
+    then wireless sensor 2 for the zone.
+    """
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
+        """Initialize zone temperature sensor."""
+        super().__init__(coordinator)
+        self.zone_number = zone_number
+        zone_name = coordinator.data.zones[zone_number].name
+        self._attr_name = f"{zone_name} Temperature"
+
+    def _get_temperature_and_source(self) -> tuple[int | None, str | None, bool]:
+        """Get temperature value, source name, and low battery flag.
+
+        Returns (temperature, source, low_battery).
+        Follows app logic: touchpad priority, then sensor1, then sensor2.
+        """
+        data = self.coordinator.data
+
+        # Check touchpad 1 (assigned_zone is 0-indexed, -1 means unassigned)
+        tp1 = data.touchpads[0]
+        if tp1.assigned_zone == self.zone_number and tp1.temperature is not None and tp1.temperature > 0:
+            return tp1.temperature, "touchpad1", False
+
+        # Check touchpad 2
+        tp2 = data.touchpads[1]
+        if tp2.assigned_zone == self.zone_number and tp2.temperature is not None and tp2.temperature > 0:
+            return tp2.temperature, "touchpad2", False
+
+        # Check wireless sensor 1 for this zone (slot = zone_number * 2)
+        sensor1_index = self.zone_number * 2
+        if sensor1_index < len(data.sensors):
+            sensor1 = data.sensors[sensor1_index]
+            if sensor1.available:
+                return sensor1.temperature, f"wireless_{sensor1_index + 1}", sensor1.low_battery
+
+        # Check wireless sensor 2 for this zone (slot = zone_number * 2 + 1)
+        sensor2_index = self.zone_number * 2 + 1
+        if sensor2_index < len(data.sensors):
+            sensor2 = data.sensors[sensor2_index]
+            if sensor2.available:
+                return sensor2.temperature, f"wireless_{sensor2_index + 1}", sensor2.low_battery
+
+        return None, None, False
+
+    @property
+    def native_value(self) -> float | None:
+        """Return temperature value."""
+        temp, _, _ = self._get_temperature_and_source()
+        return float(temp) if temp is not None else None
+
+    @property
+    def available(self) -> bool:
+        """Return True if any temperature source is available."""
+        temp, _, _ = self._get_temperature_and_source()
+        return temp is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra attributes including source and battery status."""
+        temp, source, low_battery = self._get_temperature_and_source()
+        attrs: dict[str, Any] = {}
+        if source:
+            attrs["source"] = source
+        if low_battery:
+            attrs["low_battery"] = True
+        return attrs
+
+    @property
+    def unique_id(self) -> str:
+        """Return unique ID."""
+        return f"{self.coordinator.data.device_id}_zone_{self.zone_number}_temperature"
 
     @property
     def device_info(self) -> DeviceInfo:
