@@ -346,18 +346,18 @@ class AirTouch3Client:
 
             group_byte = data[const.OFFSET_GROUP_DATA + zone_num]
             group_index = (group_byte >> 4) & 0x0F  # app uses high nibble (bits 4-7)
-            data_index = group_byte & 0x0F
+            data_index = (group_byte >> 4) & 0x0F
             if not (0 <= data_index < const.STATE_ZONE_MAX):
                 data_index = zone_num
 
             zone_data = data[const.OFFSET_ZONE_DATA + data_index]
-            # Combine high-bit (app binary string) and low-bit (protocol doc) interpretations.
+            # Prefer high-bit flags (matches app binary-string usage); fall back to low bits if high bits are clear.
             high_on = bool(zone_data & 0x80)
             high_spill = bool(zone_data & 0x40)
             low_on = bool(zone_data & 0x01)
             low_spill = bool(zone_data & 0x02)
-            is_on = high_on or low_on
-            is_spill = high_spill or low_spill
+            is_on = high_on if (zone_data & 0xC0) else low_on
+            is_spill = high_spill if (zone_data & 0xC0) else low_spill
             active_program = (zone_data >> 2) & 0x07
 
             damper_value = data[const.OFFSET_ZONE_DAMPER + data_index] & 0x7F
