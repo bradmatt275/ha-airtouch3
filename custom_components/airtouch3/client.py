@@ -358,7 +358,8 @@ class AirTouch3Client:
             low_spill = bool(zone_data & 0x02)
             high_on = bool(zone_data & 0x80)
             high_spill = bool(zone_data & 0x40)
-            is_on = low_on
+            # Heuristic: treat zone as on if any flag says on OR damper is not fully open.
+            is_on = high_on or low_on or damper_percent < 95
             is_spill = low_spill or high_spill
             active_program = (zone_data >> 2) & 0x07
 
