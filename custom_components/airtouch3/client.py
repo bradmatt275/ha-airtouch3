@@ -354,12 +354,14 @@ class AirTouch3Client:
             damper_percent = min(100, damper_value * 5)
 
             # Zone data (per protocol): bit0 on/off, bit1 spill, bits2-4 program.
-            # Note: low-bit flags (bit0, bit1) are noisy and toggle between frames.
-            # Use only high-bit flags for stable state detection.
+            # Note: Both high and low bit flags are unreliable and toggle between frames.
+            # Use damper position as the primary indicator:
+            # - Damper < 100% means zone is actively receiving airflow (ON)
+            # - Damper = 100% (fully open) means zone is OFF or in spill mode
             high_on = bool(zone_data & 0x80)
             high_spill = bool(zone_data & 0x40)
-            is_on = high_on
-            is_spill = high_spill
+            is_on = damper_percent < 100
+            is_spill = high_spill and damper_percent == 100
             active_program = (zone_data >> 2) & 0x07
 
             feedback = data[const.OFFSET_ZONE_FEEDBACK + data_index]
