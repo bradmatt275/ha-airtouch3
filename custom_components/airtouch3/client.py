@@ -360,7 +360,7 @@ class AirTouch3Client:
             low_on = bool(zone_data & 0x01)
             low_spill = bool(zone_data & 0x02)
             # Prefer high flags; fall back to low flags only.
-            is_on = high_on or low_on
+            is_on = high_on
             is_spill = high_spill or low_spill
             active_program = (zone_data >> 2) & 0x07
 
