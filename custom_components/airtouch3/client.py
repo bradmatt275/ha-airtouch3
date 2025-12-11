@@ -351,6 +351,9 @@ class AirTouch3Client:
                 data_index = zone_num
 
             zone_data = data[const.OFFSET_ZONE_DATA + data_index]
+            damper_value = data[const.OFFSET_ZONE_DAMPER + data_index] & 0x7F
+            damper_percent = min(100, damper_value * 5)
+
             # Use high-bit flags (matches app binary-string usage in the app).
             high_on = bool(zone_data & 0x80)
             high_spill = bool(zone_data & 0x40)
@@ -360,9 +363,6 @@ class AirTouch3Client:
             is_on = high_on or low_on or damper_percent < 100
             is_spill = high_spill
             active_program = (zone_data >> 2) & 0x07
-
-            damper_value = data[const.OFFSET_ZONE_DAMPER + data_index] & 0x7F
-            damper_percent = min(100, damper_value * 5)
 
             feedback = data[const.OFFSET_ZONE_FEEDBACK + data_index]
             sensor_source = (feedback >> 5) & 0x07
