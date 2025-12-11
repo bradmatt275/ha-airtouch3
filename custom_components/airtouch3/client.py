@@ -351,11 +351,13 @@ class AirTouch3Client:
             data_index = group_index if 0 <= group_index < const.STATE_ZONE_MAX else zone_num
 
             zone_data = data[const.OFFSET_ZONE_DATA + data_index]
-            # App uses bit7 for on/off and bit6 for spill (binary string substring(0,1)/(1,2))
+            # Combine high-bit (app binary string) and low-bit (protocol doc) interpretations.
             high_on = bool(zone_data & 0x80)
             high_spill = bool(zone_data & 0x40)
-            is_on = high_on
-            is_spill = high_spill
+            low_on = bool(zone_data & 0x01)
+            low_spill = bool(zone_data & 0x02)
+            is_on = high_on or low_on
+            is_spill = high_spill or low_spill
             active_program = (zone_data >> 2) & 0x07
 
             damper_value = data[const.OFFSET_ZONE_DAMPER + data_index] & 0x7F
@@ -380,14 +382,16 @@ class AirTouch3Client:
             )
             if LOGGER.isEnabledFor(logging.DEBUG):
                 LOGGER.debug(
-                    "Zone %s (group %s -> data %s, group_byte=0x%02x, zone_data=0x%02x high_on=%s high_spill=%s): on=%s spill=%s damper_raw=%s (%s%%) feedback=0x%02x",
+                    "Zone %s (group %s -> data %s, group_byte=0x%02x, zone_data=0x%02x high_on=%s low_on=%s high_spill=%s low_spill=%s): on=%s spill=%s damper_raw=%s (%s%%) feedback=0x%02x",
                     name or zone_num,
                     zone_num,
                     data_index,
                     group_byte,
                     zone_data,
                     high_on,
+                    low_on,
                     high_spill,
+                    low_spill,
                     is_on,
                     is_spill,
                     damper_value,
