@@ -3,11 +3,11 @@
   "name": "AirTouch 3",
   "version": "1.0.0",
   "codeowners": [
-    "@mattbrady"
+    "@bradmatt275"
   ],
   "config_flow": true,
-  "documentation": "https://github.com/mattbrady/ha-airtouch3",
-  "issue_tracker": "https://github.com/mattbrady/ha-airtouch3/issues",
+  "documentation": "https://github.com/bradmatt275/ha-airtouch3",
+  "issue_tracker": "https://github.com/bradmatt275/ha-airtouch3/issues",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "requirements": []
