@@ -413,7 +413,8 @@ class AirTouch3Client:
             zone_assign = data[const.OFFSET_TOUCHPAD_ZONE + tp_index]
             assigned_zone = zone_assign - 1 if zone_assign > 0 else -1
             temp_raw = data[const.OFFSET_TOUCHPAD_TEMP + tp_index]
-            temp_value = (temp_raw >> 1) & 0x7F
+            # Temperature is in bits 0-6 (mask 0x7F)
+            temp_value = temp_raw & 0x7F
             touchpads.append(
                 TouchpadState(
                     touchpad_number=tp_index + 1,
@@ -436,7 +437,8 @@ class AirTouch3Client:
             raw = data[const.OFFSET_WIRELESS_SENSORS + sensor_index]
             available = bool(raw & 0x01)
             low_battery = bool(raw & 0x02)
-            temperature = (raw >> 2) & 0x3F
+            # Temperature is in bits 0-5 (mask 0x3F)
+            temperature = raw & 0x3F
             sensors.append(
                 SensorState(
                     sensor_number=sensor_index + 1,
