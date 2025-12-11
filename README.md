@@ -30,7 +30,7 @@ Each zone is represented as a sub-device with the following entities:
 ### HACS (recommended)
 1. In Home Assistant, open HACS → Integrations.
 2. Click the three dots → **Custom repositories**.
-3. Add `https://github.com/mattbrady/ha-airtouch3` as category **Integration**.
+3. Add `https://github.com/bradmatt275/ha-airtouch3` as category **Integration**.
 4. Download the integration, then restart Home Assistant.
 
 ### Manual
