@@ -345,8 +345,13 @@ class AirTouch3Client:
                 data[name_start : name_start + const.STATE_ZONE_NAME_LENGTH]
             ).decode("ascii", errors="ignore").strip()
 
-            group_index = data[const.OFFSET_GROUP_DATA + zone_num] & 0x0F
-            data_index = group_index if group_index < const.STATE_ZONE_MAX else zone_num
+            group_byte = data[const.OFFSET_GROUP_DATA + zone_num]
+            group_index = (group_byte >> 4) & 0x0F  # app uses high nibble (bits 4-7)
+            data_index = (
+                group_index
+                if 0 <= group_index < const.STATE_ZONE_MAX and group_index < zone_count
+                else zone_num
+            )
 
             zone_data = data[const.OFFSET_ZONE_DATA + data_index]
             is_on = bool(zone_data & 0x01)
@@ -375,10 +380,11 @@ class AirTouch3Client:
             )
             if LOGGER.isEnabledFor(logging.DEBUG):
                 LOGGER.debug(
-                    "Zone %s (group %s -> data %s): on=%s spill=%s damper_raw=%s (%s%%) feedback=0x%02x",
+                    "Zone %s (group %s -> data %s, group_byte=0x%02x): on=%s spill=%s damper_raw=%s (%s%%) feedback=0x%02x",
                     name or zone_num,
                     zone_num,
                     data_index,
+                    group_byte,
                     is_on,
                     is_spill,
                     damper_value,
