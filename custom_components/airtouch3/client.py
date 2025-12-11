@@ -359,9 +359,9 @@ class AirTouch3Client:
             high_spill = bool(zone_data & 0x40)
             low_on = bool(zone_data & 0x01)
             low_spill = bool(zone_data & 0x02)
-            # Heuristic: consider zone on if any flag says on or damper is not fully open (device reports 100% when off)
-            is_on = high_on or low_on or damper_percent < 100
-            is_spill = high_spill
+            # Prefer high flags; fall back to low flags only.
+            is_on = high_on or low_on
+            is_spill = high_spill or low_spill
             active_program = (zone_data >> 2) & 0x07
 
             feedback = data[const.OFFSET_ZONE_FEEDBACK + data_index]
