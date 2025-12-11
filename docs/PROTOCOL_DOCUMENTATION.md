@@ -341,8 +341,14 @@ Each byte is a binary-encoded ASCII character.
 | 0 | Zone ON/OFF status (`byte & 0x01`) |
 | 1 | Spill status (`byte & 0x02`) |
 | 2-4 | Program number (mask `byte & 0x1C`, shift right 2; 0 = none, 1-4 = active program) |
+| 6 | High spill flag (`byte & 0x40`) |
+| 7 | High ON flag (`byte & 0x80`) |
 
 **Note:** Program values > 4 should be subtracted by 4.
+
+**Important - Zone ON/OFF Reliability:** Testing revealed that both the low-bit (bit 0) and high-bit (bit 7) ON/OFF flags are unreliable and can toggle between consecutive frames, causing state flicker. The **damper position** (bytes 248-263) is the only reliable indicator of zone state:
+- Damper < 100% = Zone is ON (actively receiving airflow)
+- Damper = 100% = Zone is OFF (fully open, no restriction)
 
 ---
 
@@ -351,6 +357,8 @@ Each byte is a binary-encoded ASCII character.
 16 bytes, one per zone. Each byte's bits 0-6 represent damper opening value:
 - Parse bits 0-6 as `value = byte & 0x7F`
 - Multiply by 5 to get percentage (0-100%)
+
+**Note:** Use damper position to determine zone ON/OFF state (see Zone Data section above). The damper value is stable across frames, unlike the bit flags.
 
 ---
 
@@ -631,8 +639,18 @@ def encode_fan_speed(mode_name, brand, supported_speed):
 
 - Byte 443: Touchpad 1 assigned group (1-based, subtract 1 for zone index)
 - Byte 444: Touchpad 2 assigned group
-- Byte 445 bits 1-7: Touchpad 1 temperature reading
-- Byte 446 bits 1-7: Touchpad 2 temperature reading
+- Byte 445 bits 0-6: Touchpad 1 temperature reading (mask with `0x7F`)
+- Byte 446 bits 0-6: Touchpad 2 temperature reading (mask with `0x7F`)
+
+**Parsing:**
+```python
+touchpad1_zone = state[443] - 1  # 0-indexed, -1 if unassigned
+touchpad2_zone = state[444] - 1
+touchpad1_temp = state[445] & 0x7F  # Temperature in Celsius
+touchpad2_temp = state[446] & 0x7F
+```
+
+**Note:** The original documentation suggested bits 1-7, but testing confirmed the temperature is in bits 0-6 (mask `0x7F`). The app's decompiled code uses `substring(1, 8)` on a binary string with bit 7 at index 0, which is equivalent to masking with `0x7F`.
 
 ---
 
@@ -649,20 +667,37 @@ Total hours = low + (high × 256)
 
 ### Wireless Sensors (Bytes 451-482)
 
-32 sensor slots, one byte each:
+32 sensor slots, one byte each. Sensors are mapped to zones: zone N uses sensor slots N*2 and N*2+1.
 
 | Bit | Content |
 |-----|---------|
-| 0 | Available flag (1 = sensor present) |
-| 1 | Low battery flag (1 = low battery) |
-| 2-7 | Temperature value |
+| 7 | Available flag (1 = sensor present) |
+| 6 | Low battery flag (1 = low battery) |
+| 0-5 | Temperature value in Celsius |
 
 **Parsing:**
 ```python
-available = (byte >> 0) & 1
-low_battery = (byte >> 1) & 1
-temperature = (byte >> 2) & 0x3F
+available = bool(byte & 0x80)    # bit 7
+low_battery = bool(byte & 0x40)  # bit 6
+temperature = byte & 0x3F        # bits 0-5, direct Celsius value
 ```
+
+**Zone to Sensor Mapping:**
+```python
+# Each zone has up to 2 sensor slots
+sensor1_index = zone_number * 2
+sensor2_index = zone_number * 2 + 1
+
+# Example: Zone 1 (TV Room) uses sensor slots 2 and 3
+# Example: Zone 2 (Master) uses sensor slots 4 and 5
+```
+
+**Temperature Source Priority** (following app logic):
+1. Touchpad assigned to the zone (if available and reporting)
+2. Wireless sensor 1 for the zone (slot = zone * 2)
+3. Wireless sensor 2 for the zone (slot = zone * 2 + 1)
+
+**Note:** The original documentation had bits inverted. The app's decompiled code uses `substring(0, 1)` for available and `substring(1, 2)` for low battery on a binary string with bit 7 at index 0. This means bit 7 = available, bit 6 = low battery, and bits 0-5 = temperature. Wireless sensors are battery-powered and transmit intermittently.
 
 ---
 
