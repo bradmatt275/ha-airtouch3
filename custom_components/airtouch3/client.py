@@ -296,11 +296,13 @@ class AirTouch3Client:
         ac_units: list[AcState] = []
         for ac_num in range(2):
             status = data[const.OFFSET_AC_STATUS + ac_num]
-            power_on = bool(status & 0x01)
+            # App uses bit 7 for power (substring(0,1) on binary string with MSB first)
+            # Bit 1 is error flag
+            power_on = bool(status & 0x80)
             has_error = bool(status & 0x02)
             if LOGGER.isEnabledFor(logging.DEBUG):
                 LOGGER.debug(
-                    "AC %d: status_byte=0x%02x (%s), power_on=%s, has_error=%s",
+                    "AC %d: status_byte=0x%02x (%s), power_on=%s (bit7), has_error=%s (bit1)",
                     ac_num + 1, status, format(status, '08b'), power_on, has_error
                 )
 
