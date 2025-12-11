@@ -345,7 +345,6 @@ class AirTouch3Client:
             ).decode("ascii", errors="ignore").strip()
 
             group_byte = data[const.OFFSET_GROUP_DATA + zone_num]
-            group_index = (group_byte >> 4) & 0x0F  # app uses high nibble (bits 4-7)
             data_index = (group_byte >> 4) & 0x0F
             if not (0 <= data_index < const.STATE_ZONE_MAX):
                 data_index = zone_num
@@ -354,13 +353,13 @@ class AirTouch3Client:
             damper_value = data[const.OFFSET_ZONE_DAMPER + data_index] & 0x7F
             damper_percent = min(100, damper_value * 5)
 
-            # Treat zone as on if the high-bit on flag is set OR damper is not fully open.
-            # Damper is typically 100% when off and <80% when on.
+            # Zone data (per protocol): bit0 on/off, bit1 spill, bits2-4 program.
+            low_on = bool(zone_data & 0x01)
+            low_spill = bool(zone_data & 0x02)
             high_on = bool(zone_data & 0x80)
             high_spill = bool(zone_data & 0x40)
-            is_on = high_on or damper_percent < 95
-            low_spill = bool(zone_data & 0x02)
-            is_spill = high_spill or low_spill
+            is_on = low_on
+            is_spill = low_spill or high_spill
             active_program = (zone_data >> 2) & 0x07
 
             feedback = data[const.OFFSET_ZONE_FEEDBACK + data_index]
