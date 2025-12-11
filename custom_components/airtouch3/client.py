@@ -370,15 +370,13 @@ class AirTouch3Client:
             damper_value = data[const.OFFSET_ZONE_DAMPER + data_index] & 0x7F
             damper_percent = min(100, damper_value * 5)
 
-            # Zone data (per protocol): bit0 on/off, bit1 spill, bits2-4 program.
-            # Note: Both high and low bit flags are unreliable and toggle between frames.
-            # Use damper position as the primary indicator:
-            # - Damper < 100% means zone is actively receiving airflow (ON)
-            # - Damper = 100% (fully open) means zone is OFF or in spill mode
-            high_on = bool(zone_data & 0x80)
-            high_spill = bool(zone_data & 0x40)
-            is_on = damper_percent < 100
-            is_spill = high_spill and damper_percent == 100
+            # Zone data bits (MSB-first as per Android app's toFullBinaryString):
+            # - Bit 7 (0x80): Zone ON/OFF state (1=ON, 0=OFF)
+            # - Bit 6 (0x40): Spill mode indicator
+            # - Bits 5-3: Program number
+            # The Android app uses bit 7 for ON/OFF determination (see WifiCommService.java)
+            is_on = bool(zone_data & 0x80)
+            is_spill = bool(zone_data & 0x40)
             active_program = (zone_data >> 2) & 0x07
 
             feedback = data[const.OFFSET_ZONE_FEEDBACK + data_index]
@@ -400,14 +398,12 @@ class AirTouch3Client:
             )
             if LOGGER.isEnabledFor(logging.DEBUG):
                 LOGGER.debug(
-                    "Zone %s (group %s -> data %s, group_byte=0x%02x, zone_data=0x%02x high_on=%s high_spill=%s): on=%s spill=%s damper_raw=%s (%s%%) feedback=0x%02x",
+                    "Zone %s (group %s -> data %s, group_byte=0x%02x, zone_data=0x%02x): on=%s spill=%s damper_raw=%s (%s%%) feedback=0x%02x",
                     name or zone_num,
                     zone_num,
                     data_index,
                     group_byte,
                     zone_data,
-                    high_on,
-                    high_spill,
                     is_on,
                     is_spill,
                     damper_value,

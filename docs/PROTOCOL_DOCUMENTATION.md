@@ -338,17 +338,14 @@ Each byte is a binary-encoded ASCII character.
 
 | Bit | Content |
 |-----|---------|
-| 0 | Zone ON/OFF status (`byte & 0x01`) |
-| 1 | Spill status (`byte & 0x02`) |
-| 2-4 | Program number (mask `byte & 0x1C`, shift right 2; 0 = none, 1-4 = active program) |
-| 6 | High spill flag (`byte & 0x40`) |
-| 7 | High ON flag (`byte & 0x80`) |
+| 7 | **Zone ON/OFF status** (`byte & 0x80`) - Use this bit! |
+| 6 | Spill status (`byte & 0x40`) |
+| 5-3 | Program number (bits 5-3, mask `(byte >> 2) & 0x07`) |
+| 2-0 | Reserved/unused |
+
+**Important:** The Android app uses **bit 7** (MSB) for zone ON/OFF determination. The app converts each byte to a binary string using `toFullBinaryString()` which produces MSB-first strings, then uses `substring(0,1)` to check the first character (bit 7). See WifiCommService.java lines 1178-1183.
 
 **Note:** Program values > 4 should be subtracted by 4.
-
-**Important - Zone ON/OFF Reliability:** Testing revealed that both the low-bit (bit 0) and high-bit (bit 7) ON/OFF flags are unreliable and can toggle between consecutive frames, causing state flicker. The **damper position** (bytes 248-263) is the only reliable indicator of zone state:
-- Damper < 100% = Zone is ON (actively receiving airflow)
-- Damper = 100% = Zone is OFF (fully open, no restriction)
 
 ---
 
@@ -358,7 +355,7 @@ Each byte is a binary-encoded ASCII character.
 - Parse bits 0-6 as `value = byte & 0x7F`
 - Multiply by 5 to get percentage (0-100%)
 
-**Note:** Use damper position to determine zone ON/OFF state (see Zone Data section above). The damper value is stable across frames, unlike the bit flags.
+**Note:** Damper position indicates the airflow percentage, NOT the zone ON/OFF state. Use bit 7 of Zone Data (bytes 232-247) for ON/OFF. A zone that is OFF may retain its previous damper position.
 
 ---
 
@@ -480,11 +477,13 @@ To extract counts from bits 1-7, mask with `0xFE` and shift right one (e.g., `ac
 **Byte 423 (AC1):**
 | Bit | Content |
 |-----|---------|
-| 0 | Power status (`byte & 0x01`, 1 = ON) |
+| 7 | Power status (`byte & 0x80`, 1 = ON) |
 | 1 | Error flag (`byte & 0x02`, 1 = error present) |
 | 2-4 | Active program number (`(byte >> 2) & 0x07`; 0 = none, 1-4 = active) |
 
 **Byte 424 (AC2):** Same structure as byte 423.
+
+**IMPORTANT - Bit Numbering Trap:** The Android app converts bytes to binary strings using `toFullBinaryString()` which places bit 7 at string position 0 (MSB first). When the app checks `substring(0, 1)`, it's actually checking **bit 7**, not bit 0. The power status is in **bit 7** (mask `0x80`), NOT bit 0. This same pattern applies throughout the app's parsing code.
 
 ---
 
@@ -1517,8 +1516,8 @@ class AirTouch3Client:
 
         # Zone data (bytes 232-247)
         zone_data = self.last_state[232 + zone_num]
-        state.is_on = bool(zone_data & 0x01)
-        state.is_spill = bool(zone_data & 0x02)
+        state.is_on = bool(zone_data & 0x80)    # Bit 7 = ON/OFF
+        state.is_spill = bool(zone_data & 0x40)  # Bit 6 = Spill
 
         # Damper opening (bytes 248-263, bits 0-6 * 5)
         damper_byte = self.last_state[248 + zone_num]
