@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -22,6 +23,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, MAX_TEMP, MIN_TEMP, TEMP_STEP
 from .coordinator import AirTouch3Coordinator
 from .models import AcMode, AcState, FanSpeed
+
+LOGGER = logging.getLogger(__name__)
 
 # Ignore coordinator updates for this many seconds after a command
 OPTIMISTIC_HOLD_SECONDS = 5.0
@@ -170,27 +173,48 @@ class AirTouch3Climate(CoordinatorEntity[AirTouch3Coordinator], ClimateEntity):
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set HVAC mode."""
         ac = self._ac_state
+        LOGGER.debug(
+            "async_set_hvac_mode called: hvac_mode=%s, ac.power_on=%s, ac.mode=%s",
+            hvac_mode, ac.power_on, ac.mode
+        )
+
         if hvac_mode == HVACMode.OFF:
             if ac.power_on:
                 # Set optimistic state before sending command
+                LOGGER.debug("Turning AC off (power toggle)")
                 self._optimistic_power = False
                 self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
                 self.async_write_ha_state()
                 await self.coordinator.client.ac_power_toggle(self.ac_number)
                 await self.coordinator.async_request_refresh()
+            else:
+                LOGGER.debug("AC already off, nothing to do")
             return
 
-        # Set optimistic state for mode change
         target_mode = self._hvac_to_ac_mode(hvac_mode)
-        self._optimistic_power = True
+
+        # If device is off, turn it on first
+        if not ac.power_on:
+            LOGGER.debug("AC is off, sending power toggle to turn on")
+            self._optimistic_power = True
+            self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
+            self.async_write_ha_state()
+            await self.coordinator.client.ac_power_toggle(self.ac_number)
+            # Only set mode if different from what we expect it to resume to
+            if ac.mode != target_mode:
+                LOGGER.debug("Also setting mode to %s (was %s)", target_mode, ac.mode)
+                self._optimistic_mode = target_mode
+                await self.coordinator.client.ac_set_mode(self.ac_number, target_mode)
+            else:
+                LOGGER.debug("Mode already %s, skipping mode change", ac.mode)
+            await self.coordinator.async_request_refresh()
+            return
+
+        # Device is already on, just change the mode
+        LOGGER.debug("AC is on, changing mode to %s", target_mode)
         self._optimistic_mode = target_mode
         self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
         self.async_write_ha_state()
-
-        # Ensure device is on before setting mode
-        if not ac.power_on:
-            await self.coordinator.client.ac_power_toggle(self.ac_number)
-
         await self.coordinator.client.ac_set_mode(self.ac_number, target_mode)
         await self.coordinator.async_request_refresh()
 
