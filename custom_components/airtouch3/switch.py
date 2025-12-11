@@ -17,7 +17,10 @@ from .coordinator import AirTouch3Coordinator
 from .models import AcState, ZoneState
 
 # Ignore coordinator updates for this many seconds after a toggle command
+# Zone switches need less time as damper position is reliable
+# AC power needs longer as the status byte is less reliable
 OPTIMISTIC_HOLD_SECONDS = 5.0
+AC_OPTIMISTIC_HOLD_SECONDS = 10.0
 
 
 async def async_setup_entry(
@@ -167,7 +170,7 @@ class AirTouch3AcPowerSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEnti
         # Don't trust _ac_state.power_on as protocol data can be unreliable
         if not self.is_on:
             self._optimistic_state = True
-            self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
+            self._optimistic_until = time.monotonic() + AC_OPTIMISTIC_HOLD_SECONDS
             self.async_write_ha_state()
             await self.coordinator.client.ac_power_toggle(self.ac_number)
             await self.coordinator.async_request_refresh()
@@ -178,7 +181,7 @@ class AirTouch3AcPowerSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEnti
         # Don't trust _ac_state.power_on as protocol data can be unreliable
         if self.is_on:
             self._optimistic_state = False
-            self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
+            self._optimistic_until = time.monotonic() + AC_OPTIMISTIC_HOLD_SECONDS
             self.async_write_ha_state()
             await self.coordinator.client.ac_power_toggle(self.ac_number)
             await self.coordinator.async_request_refresh()
