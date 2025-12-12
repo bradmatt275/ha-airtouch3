@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import logging
 from typing import Iterable, List, Optional
 
@@ -320,6 +321,25 @@ class AirTouch3Client:
         LOGGER.error("Failed to reach target value %s for zone %s", target, zone_index)
         return False
 
+    async def sync_time(self, timestamp: datetime | None = None) -> bool:
+        """Send a time synchronisation command (fire-and-forget)."""
+        when = timestamp or datetime.now()
+        command = self._create_time_sync_command(when)
+        if not self.connected:
+            if not await self.connect():
+                return False
+
+        async with self._lock:
+            assert self.writer
+            try:
+                self.writer.write(command)
+                await self.writer.drain()
+            except Exception as err:  # noqa: BLE001
+                LOGGER.error("Failed to sync time: %s", err)
+                await self.disconnect()
+                return False
+        return True
+
     async def _send_ac_command(self, ac_num: int, subcommand: int, value: int) -> bool:
         """Send AC command message."""
         command = self._create_command(const.CMD_AC, ac_num, subcommand, value)
@@ -337,6 +357,34 @@ class AirTouch3Client:
                 p3 & 0xFF,
                 0x00,
                 0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+            ]
+        )
+        checksum = sum(message) & 0xFF
+        message.append(checksum)
+        return bytes(message)
+
+    def _create_time_sync_command(self, when: datetime) -> bytes:
+        """Build a 0x8B time synchronisation command."""
+        year = when.year % 100
+        month = min(11, max(0, when.month - 1))
+        day = min(30, max(0, when.day - 1))
+        hour = min(23, max(0, when.hour))
+        minute = min(58, max(0, when.minute - 1))
+
+        message = bytearray(
+            [
+                const.MSG_HEADER,
+                const.CMD_TIME_SYNC,
+                const.MSG_LENGTH,
+                year,
+                month,
+                day,
+                hour,
+                minute,
                 0x00,
                 0x00,
                 0x00,

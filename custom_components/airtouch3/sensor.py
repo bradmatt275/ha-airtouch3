@@ -39,9 +39,8 @@ async def async_setup_entry(
     for zone in coordinator.data.zones:
         entities.append(AirTouch3DamperSensor(coordinator, zone.zone_number))
         entities.append(AirTouch3ZoneTemperatureSensor(coordinator, zone.zone_number))
-        # Setpoint sensor only for zones with temperature sensors
-        if zone.has_sensor:
-            entities.append(AirTouch3ZoneSetpointSensor(coordinator, zone.zone_number))
+        # Setpoint sensor for all zones (temperature setpoint or damper %)
+        entities.append(AirTouch3ZoneSetpointSensor(coordinator, zone.zone_number))
 
     async_add_entities(entities)
 
@@ -193,16 +192,14 @@ class AirTouch3DamperSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntit
 
 
 class AirTouch3ZoneSetpointSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntity):
-    """Setpoint sensor for a zone (read-only display of target temperature).
+    """Setpoint sensor for a zone.
 
-    Only available for zones that have a temperature sensor assigned.
-    Shows the current setpoint when in temperature control mode.
+    For zones with temperature sensors: shows target temperature (°C)
+    For zones without sensors: shows target damper percentage (%)
     Supports optimistic updates when setpoint buttons are pressed.
     """
 
-    _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_has_entity_name = True
     _attr_name = "Setpoint"
 
@@ -231,41 +228,62 @@ class AirTouch3ZoneSetpointSensor(CoordinatorEntity[AirTouch3Coordinator], Senso
         return (self.coordinator.data.device_id, self.zone_number)
 
     @property
+    def _is_temperature_mode(self) -> bool:
+        """Check if zone is in temperature mode (has sensor and temp control enabled)."""
+        zone = self.coordinator.data.zones[self.zone_number]
+        return zone.has_sensor and zone.temperature_control
+
+    @property
     def native_value(self) -> float | None:
-        """Return current setpoint temperature, preferring optimistic value."""
+        """Return current setpoint value, preferring optimistic value."""
+        zone = self.coordinator.data.zones[self.zone_number]
+
         # Check for optimistic value first
         optimistic = self._optimistic_values.get(self._optimistic_key)
         if optimistic is not None:
             return float(optimistic)
 
-        # Fall back to actual value
-        zone = self.coordinator.data.zones[self.zone_number]
-        if zone.setpoint is not None:
+        # For zones with sensors in temp mode, return setpoint
+        if self._is_temperature_mode and zone.setpoint is not None:
             return float(zone.setpoint)
-        return None
+
+        # For zones without sensors or in fan mode, return damper percent
+        return float(zone.damper_percent)
 
     def _handle_coordinator_update(self) -> None:
         """Handle coordinator update - clear optimistic value if actual matches."""
         zone = self.coordinator.data.zones[self.zone_number]
         optimistic = self._optimistic_values.get(self._optimistic_key)
-        if optimistic is not None and zone.setpoint == optimistic:
-            # Actual value now matches optimistic, clear it
-            self.clear_optimistic_value(*self._optimistic_key)
+        if optimistic is not None:
+            # Check if actual value matches optimistic
+            if self._is_temperature_mode:
+                actual = zone.setpoint
+            else:
+                actual = zone.damper_percent
+            if actual == optimistic:
+                self.clear_optimistic_value(*self._optimistic_key)
         super()._handle_coordinator_update()
 
     @property
-    def available(self) -> bool:
-        """Return True if zone has a setpoint (temperature mode with sensor)."""
-        zone = self.coordinator.data.zones[self.zone_number]
-        return zone.setpoint is not None
+    def device_class(self) -> SensorDeviceClass | None:
+        """Return device class based on mode."""
+        if self._is_temperature_mode:
+            return SensorDeviceClass.TEMPERATURE
+        return None  # No device class for percentage
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        """Return unit based on mode."""
+        if self._is_temperature_mode:
+            return UnitOfTemperature.CELSIUS
+        return PERCENTAGE
 
     @property
     def icon(self) -> str:
         """Return icon based on control mode."""
-        zone = self.coordinator.data.zones[self.zone_number]
-        if zone.temperature_control:
+        if self._is_temperature_mode:
             return "mdi:thermometer"
-        return "mdi:thermometer-off"
+        return "mdi:fan"
 
     @property
     def unique_id(self) -> str:

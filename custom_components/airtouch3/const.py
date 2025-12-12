@@ -31,6 +31,7 @@ MSG_LENGTH = 0x0C
 CMD_INIT = 0x01
 CMD_ZONE = 0x81
 CMD_AC = 0x86
+CMD_TIME_SYNC = 0x8B
 
 # AC subcommands (byte 4)
 AC_POWER_TOGGLE = 0x80
