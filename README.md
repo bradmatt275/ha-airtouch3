@@ -2,6 +2,9 @@
 
 Control your Polyaire AirTouch 3 air conditioning system locally from Home Assistant. The integration speaks the native TCP protocol (port 8899) to expose AC climate entities, zone controls, and temperature sensors.
 
+## Wiki
+- [Screenshots](https://github.com/bradmatt275/ha-airtouch3/wiki/Screenshots)
+
 ## Features
 
 ### AC Unit Controls

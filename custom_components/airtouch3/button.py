@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.button import ButtonEntity
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
@@ -171,10 +172,18 @@ class AirTouch3SyncTimeButton(CoordinatorEntity[AirTouch3Coordinator], ButtonEnt
 
         if await self.coordinator.client.sync_time(now):
             notification_id = f"{self.coordinator.data.device_id}_time_sync"
-            self.hass.components.persistent_notification.async_create(
+            persistent_notification.async_create(
+                self.hass,
                 "Time Updated",
                 title="AirTouch 3",
                 notification_id=notification_id,
+            )
+            self.hass.bus.async_fire(
+                "airtouch3_time_synced",
+                {
+                    "device_id": self.coordinator.data.device_id,
+                    "time": now.isoformat(),
+                },
             )
         else:
             LOGGER.error("Failed to sync time for AirTouch 3 device %s", self.coordinator.data.device_id)
