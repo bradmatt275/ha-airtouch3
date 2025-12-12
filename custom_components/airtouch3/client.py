@@ -72,6 +72,10 @@ class AirTouch3Client:
         self._buffer = MessageBuffer()
         self._lock = asyncio.Lock()
         self._latest_state: Optional[SystemState] = None
+        # Track wireless sensor slots that have been detected.
+        # Wireless sensors transmit intermittently to save battery, so once
+        # detected we remember them to prevent has_sensor flickering.
+        self._known_wireless_sensors: set[int] = set()
 
     @property
     def connected(self) -> bool:
@@ -583,15 +587,38 @@ class AirTouch3Client:
             has_touchpad = (touchpad1_zone == zone_num) or (touchpad2_zone == zone_num)
             sensor1_slot = zone_num * 2
             sensor2_slot = zone_num * 2 + 1
-            has_wireless_sensor1 = (
+
+            # Check current availability from the raw data
+            sensor1_available_now = (
                 sensor1_slot < const.STATE_SENSOR_SLOTS
                 and bool(data[const.OFFSET_WIRELESS_SENSORS + sensor1_slot] & 0x80)
             )
-            has_wireless_sensor2 = (
+            sensor2_available_now = (
                 sensor2_slot < const.STATE_SENSOR_SLOTS
                 and bool(data[const.OFFSET_WIRELESS_SENSORS + sensor2_slot] & 0x80)
             )
+
+            # Sticky detection: once a wireless sensor is seen, remember it.
+            # Wireless sensors transmit intermittently to save battery, causing
+            # the available bit to flicker. Physical sensors don't disappear,
+            # so we treat detection as permanent (until integration reload).
+            if sensor1_available_now:
+                self._known_wireless_sensors.add(sensor1_slot)
+            if sensor2_available_now:
+                self._known_wireless_sensors.add(sensor2_slot)
+
+            has_wireless_sensor1 = sensor1_slot in self._known_wireless_sensors
+            has_wireless_sensor2 = sensor2_slot in self._known_wireless_sensors
             has_sensor = has_touchpad or has_wireless_sensor1 or has_wireless_sensor2
+
+            # Log when using cached sensor presence for debugging
+            used_cache1 = has_wireless_sensor1 and not sensor1_available_now
+            used_cache2 = has_wireless_sensor2 and not sensor2_available_now
+            if used_cache1 or used_cache2:
+                LOGGER.debug(
+                    "Zone %d (%s): using cached sensor presence (slot1=%s, slot2=%s)",
+                    zone_num, name, used_cache1, used_cache2
+                )
             LOGGER.debug(
                 "Zone %d (%s): has_touchpad=%s, has_wireless1=%s, has_wireless2=%s, has_sensor=%s",
                 zone_num, name, has_touchpad, has_wireless_sensor1, has_wireless_sensor2, has_sensor

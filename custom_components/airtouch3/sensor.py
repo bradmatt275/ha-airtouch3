@@ -248,6 +248,10 @@ class AirTouch3ZoneSetpointSensor(CoordinatorEntity[AirTouch3Coordinator], Senso
             return float(zone.setpoint)
 
         # For zones without sensors or in fan mode, return damper percent
+        # When zone is OFF in fan mode, display 0% to match physical unit behavior
+        # (the actual damper value is preserved and used when zone turns back on)
+        if not zone.is_on:
+            return 0.0
         return float(zone.damper_percent)
 
     def _handle_coordinator_update(self) -> None:
