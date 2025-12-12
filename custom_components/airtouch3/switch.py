@@ -55,9 +55,6 @@ async def async_setup_entry(
     # Zone switches
     for zone in coordinator.data.zones:
         entities.append(AirTouch3ZoneSwitch(coordinator, zone.zone_number))
-        # Add temperature control mode switch for zones with sensors
-        if zone.has_sensor:
-            entities.append(AirTouch3ZoneTempModeSwitch(coordinator, zone.zone_number))
 
     # AC power switches
     for ac in coordinator.data.ac_units:
@@ -215,81 +212,3 @@ class AirTouch3AcPowerSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEnti
     def device_info(self) -> DeviceInfo:
         """Device registry info - main device."""
         return get_main_device_info(self.coordinator)
-
-
-class AirTouch3ZoneTempModeSwitch(CoordinatorEntity[AirTouch3Coordinator], SwitchEntity):
-    """Switch to toggle zone between temperature and percentage control modes.
-
-    Only available for zones that have a temperature sensor assigned.
-    ON = Temperature control mode (setpoint in °C)
-    OFF = Percentage control mode (damper %)
-    """
-
-    _attr_has_entity_name = True
-    _attr_name = "Temp Control"  # Device name already includes zone name
-
-    def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
-        """Initialize zone temp mode switch."""
-        super().__init__(coordinator)
-        self.zone_number = zone_number
-        self._optimistic_state: bool | None = None
-        self._optimistic_until: float = 0.0
-
-    @property
-    def _zone_state(self) -> ZoneState:
-        return self.coordinator.data.zones[self.zone_number]
-
-    @property
-    def is_on(self) -> bool:
-        """Return True if zone is in temperature control mode."""
-        if self._optimistic_state is not None and time.monotonic() < self._optimistic_until:
-            return self._optimistic_state
-        self._optimistic_state = None
-        return self._zone_state.temperature_control
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from coordinator."""
-        if self._optimistic_state is not None:
-            if time.monotonic() >= self._optimistic_until:
-                self._optimistic_state = None
-            elif self._zone_state.temperature_control == self._optimistic_state:
-                self._optimistic_state = None
-        super()._handle_coordinator_update()
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        """Switch to temperature control mode."""
-        if not self._zone_state.temperature_control:
-            self._optimistic_state = True
-            self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
-            self.async_write_ha_state()
-            await self.coordinator.client.zone_toggle_mode(self.zone_number)
-            await self.coordinator.async_request_refresh()
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        """Switch to percentage control mode."""
-        if self._zone_state.temperature_control:
-            self._optimistic_state = False
-            self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
-            self.async_write_ha_state()
-            await self.coordinator.client.zone_toggle_mode(self.zone_number)
-            await self.coordinator.async_request_refresh()
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Additional attributes."""
-        zone = self._zone_state
-        return {
-            "setpoint": zone.setpoint,
-            "damper_percent": zone.damper_percent,
-        }
-
-    @property
-    def unique_id(self) -> str:
-        """Unique ID for temp mode switch."""
-        return f"{self.coordinator.data.device_id}_zone_{self.zone_number}_temp_mode"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Device registry info - zone sub-device."""
-        return get_zone_device_info(self.coordinator, self.zone_number)
