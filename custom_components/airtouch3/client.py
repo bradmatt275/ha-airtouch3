@@ -368,12 +368,22 @@ class AirTouch3Client:
         return bytes(message)
 
     def _create_time_sync_command(self, when: datetime) -> bytes:
-        """Build a 0x8B time synchronisation command."""
+        """Build a 0x8B time synchronisation command.
+
+        Protocol format (per documentation):
+        - Byte 3: Year (2-digit, e.g., 25 for 2025)
+        - Byte 4: Month - 1 (0-11)
+        - Byte 5: Day - 1 (0-30)
+        - Byte 6: Hour (0-23)
+        - Byte 7: Minute - 1 (0-58), protocol quirk: minute 0 maps to 0
+        """
         year = when.year % 100
-        month = min(11, max(0, when.month - 1))
-        day = min(30, max(0, when.day - 1))
-        hour = min(23, max(0, when.hour))
-        minute = min(58, max(0, when.minute - 1))
+        month = max(0, min(11, when.month - 1))
+        day = max(0, min(30, when.day - 1))
+        hour = max(0, min(23, when.hour))
+        # Protocol expects minute - 1, range 0-58
+        # Minute 0 maps to 0 (device interprets as minute 1 or handles specially)
+        minute = max(0, min(58, when.minute - 1))
 
         message = bytearray(
             [
@@ -536,16 +546,15 @@ class AirTouch3Client:
                 data_index = zone_num
 
             zone_data = data[const.OFFSET_ZONE_DATA + data_index]
-            damper_byte = data[const.OFFSET_ZONE_DAMPER + data_index]
+
+            # IMPORTANT: The damper byte (offset 248) is indexed by zone_num, NOT data_index.
+            # Both damper percentage (bits 0-6) and temperature control mode (bit 7) use zone_num.
+            # This was verified by testing - data_index gives wrong damper values for zones
+            # where data_index != zone_num.
+            damper_byte = data[const.OFFSET_ZONE_DAMPER + zone_num]
             damper_value = damper_byte & 0x7F
             damper_percent = min(100, damper_value * 5)
-
-            # IMPORTANT: Temperature control mode (bit 7) is indexed by zone_num, NOT data_index.
-            # The damper percentage (bits 0-6) uses data_index, but the control mode flag
-            # is stored sequentially by zone number. This was verified via Wireshark captures
-            # comparing the Android app's state reads against our parsing.
-            temp_control_byte = data[const.OFFSET_ZONE_DAMPER + zone_num]
-            temperature_control = bool(temp_control_byte & 0x80)
+            temperature_control = bool(damper_byte & 0x80)
 
             # Zone data bits (MSB-first as per Android app's toFullBinaryString):
             # - Bit 7 (0x80): Zone ON/OFF state (1=ON, 0=OFF)
@@ -583,6 +592,10 @@ class AirTouch3Client:
                 and bool(data[const.OFFSET_WIRELESS_SENSORS + sensor2_slot] & 0x80)
             )
             has_sensor = has_touchpad or has_wireless_sensor1 or has_wireless_sensor2
+            LOGGER.debug(
+                "Zone %d (%s): has_touchpad=%s, has_wireless1=%s, has_wireless2=%s, has_sensor=%s",
+                zone_num, name, has_touchpad, has_wireless_sensor1, has_wireless_sensor2, has_sensor
+            )
 
             zones.append(
                 ZoneState(

@@ -16,14 +16,13 @@ The AirTouch 3 protocol uses TWO different indexing schemes for zone data:
 Derived from Group Data bytes at offset 264. Extract with: `(group_byte >> 4) & 0x0F`
 
 **Used for:**
-- Zone Data byte (offset 232 + data_index)
-- Damper percentage value (bits 0-6 of byte at offset 248 + data_index)
+- Zone Data byte (offset 232 + data_index) - contains ON/OFF state, spill mode, program number
 
 ### 2. `zone_num` (sequential zone number)
 Simple sequential numbering: Zone 0, Zone 1, Zone 2, etc.
 
 **Used for:**
-- Temperature control mode flag (bit 7 of byte at offset 248 + zone_num)
+- **Entire damper byte (offset 248 + zone_num)** - both damper percentage (bits 0-6) AND temperature control mode (bit 7)
 - Feedback/setpoint byte (offset 296 + zone_num)
 - All zone commands (zone_num is the parameter sent to the device)
 
@@ -34,10 +33,10 @@ For many installations, `data_index == zone_num`, so bugs may not be apparent. B
 | Zone Name | zone_num | data_index | Issue if wrong index used |
 |-----------|----------|------------|---------------------------|
 | Living    | 0        | 0          | None (same) |
-| TV room   | 1        | 2          | Wrong setpoint, wrong control mode |
-| Master    | 2        | 3          | Wrong setpoint, wrong control mode |
+| TV room   | 1        | 2          | Wrong damper %, wrong setpoint, wrong control mode |
+| Master    | 2        | 3          | Wrong damper %, wrong setpoint, wrong control mode |
 
-**Verified via Wireshark captures** comparing Android app behavior to our implementation.
+**Verified via testing** - comparing actual unit values to parsed values showed `zone_num` is correct for damper byte.
 
 ---
 
