@@ -393,6 +393,29 @@ Each byte is a binary-encoded ASCII character.
 - Multiply by 5 to get percentage (0-100%)
 - Bit 7 indicates whether the zone is in temperature setpoint mode (when a sensor is assigned)
 
+**IMPORTANT - Indexing Difference:**
+
+The damper percentage (bits 0-6) and temperature control mode (bit 7) use **different indexing**:
+
+- **Damper percentage**: Indexed by `data_index` from Group Data (bytes 264-279)
+- **Temperature control mode**: Indexed by `zone_num` (0-based zone number)
+
+This was verified via Wireshark captures comparing the Android app's state reads. Zones with non-matching `data_index` and `zone_num` values will read incorrect control mode if the wrong index is used.
+
+```python
+# Correct parsing:
+group_byte = state[264 + zone_num]
+data_index = (group_byte >> 4) & 0x0F
+
+# Damper percentage uses data_index
+damper_byte = state[248 + data_index]
+damper_percent = (damper_byte & 0x7F) * 5
+
+# Temperature control mode uses zone_num
+temp_control_byte = state[248 + zone_num]
+temperature_control = bool(temp_control_byte & 0x80)
+```
+
 **Note:** Damper position indicates the airflow percentage, NOT the zone ON/OFF state. Use bit 7 of Zone Data (bytes 232-247) for ON/OFF. A zone that is OFF may retain its previous damper position.
 
 ---
@@ -1676,6 +1699,7 @@ This documentation is based on reverse engineering of the AirTouch 3 Android app
 
 ## Version History
 
+- **v1.2** (2025-12-12): Documented critical indexing difference for zone damper bytes - temperature control mode (bit 7) is indexed by zone_num, while damper percentage (bits 0-6) is indexed by data_index. Verified via Wireshark captures.
 - **v1.1** (2025-12-12): Added zone control mode toggle and value adjustment commands, sensor capability detection
 - **v1.0** (2025-12-10): Initial documentation based on AirTouch3 v2.12 APK decompilation
 

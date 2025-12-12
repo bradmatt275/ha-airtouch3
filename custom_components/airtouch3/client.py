@@ -440,8 +440,13 @@ class AirTouch3Client:
             damper_byte = data[const.OFFSET_ZONE_DAMPER + data_index]
             damper_value = damper_byte & 0x7F
             damper_percent = min(100, damper_value * 5)
-            # Bit 7 of damper byte indicates temperature control mode (1=temp, 0=percent)
-            temperature_control = bool(damper_byte & 0x80)
+
+            # IMPORTANT: Temperature control mode (bit 7) is indexed by zone_num, NOT data_index.
+            # The damper percentage (bits 0-6) uses data_index, but the control mode flag
+            # is stored sequentially by zone number. This was verified via Wireshark captures
+            # comparing the Android app's state reads against our parsing.
+            temp_control_byte = data[const.OFFSET_ZONE_DAMPER + zone_num]
+            temperature_control = bool(temp_control_byte & 0x80)
 
             # Zone data bits (MSB-first as per Android app's toFullBinaryString):
             # - Bit 7 (0x80): Zone ON/OFF state (1=ON, 0=OFF)

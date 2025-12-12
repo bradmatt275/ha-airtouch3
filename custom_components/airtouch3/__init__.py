@@ -45,8 +45,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
-    # Always include switch (for AC power and zones), select (for AC mode/fan), number (for zone values), and button (for mode toggle)
-    platforms = [Platform.SWITCH, Platform.SELECT, Platform.NUMBER, Platform.BUTTON]
+    # Always include switch (for AC power and zones), select (for AC mode/fan/zone control mode), number (for zone values)
+    platforms = [Platform.SWITCH, Platform.SELECT, Platform.NUMBER]
     if include_sensors:
         platforms.append(Platform.SENSOR)
 
@@ -58,7 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     coordinator: AirTouch3Coordinator = hass.data[DOMAIN][entry.entry_id]
-    platforms = [Platform.SWITCH, Platform.SELECT, Platform.NUMBER, Platform.BUTTON]
+    platforms = [Platform.SWITCH, Platform.SELECT, Platform.NUMBER]
     if entry.options.get(CONF_INCLUDE_SENSORS, DEFAULT_INCLUDE_SENSORS):
         platforms.append(Platform.SENSOR)
 

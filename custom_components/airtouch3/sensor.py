@@ -35,13 +35,10 @@ async def async_setup_entry(
     for ac in coordinator.data.ac_units:
         entities.append(AirTouch3AcTemperatureSensor(coordinator, ac.ac_number))
 
-    # Zone damper percentage, temperature, and control mode
+    # Zone damper percentage and temperature
     for zone in coordinator.data.zones:
         entities.append(AirTouch3DamperSensor(coordinator, zone.zone_number))
         entities.append(AirTouch3ZoneTemperatureSensor(coordinator, zone.zone_number))
-        # Control mode sensor only for zones with sensors
-        if zone.has_sensor:
-            entities.append(AirTouch3ZoneControlModeSensor(coordinator, zone.zone_number))
 
     async_add_entities(entities)
 
@@ -192,45 +189,3 @@ class AirTouch3DamperSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntit
         return get_zone_device_info(self.coordinator, self.zone_number)
 
 
-class AirTouch3ZoneControlModeSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntity):
-    """Sensor showing the current zone control mode (Temperature or Fan).
-
-    Only available for zones that have a temperature sensor assigned.
-    Uses optimistic updates - when the toggle button is pressed, the state
-    immediately shows the expected new value, reverting after timeout if
-    the actual state doesn't change.
-    """
-
-    _attr_has_entity_name = True
-    _attr_name = "Control Mode"
-    _attr_icon = "mdi:thermostat"
-
-    def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
-        """Initialize control mode sensor."""
-        super().__init__(coordinator)
-        self.zone_number = zone_number
-
-    @property
-    def native_value(self) -> str:
-        """Return the current control mode.
-
-        Uses coordinator's get_zone_control_mode which handles optimistic state.
-        """
-        is_temp_mode = self.coordinator.get_zone_control_mode(self.zone_number)
-        return "Temperature" if is_temp_mode else "Fan"
-
-    @property
-    def icon(self) -> str:
-        """Return icon based on current mode."""
-        is_temp_mode = self.coordinator.get_zone_control_mode(self.zone_number)
-        return "mdi:thermometer" if is_temp_mode else "mdi:fan"
-
-    @property
-    def unique_id(self) -> str:
-        """Return unique ID."""
-        return f"{self.coordinator.data.device_id}_zone_{self.zone_number}_control_mode"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Device registry info - zone sub-device."""
-        return get_zone_device_info(self.coordinator, self.zone_number)

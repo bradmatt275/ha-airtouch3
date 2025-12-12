@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import AirTouch3Coordinator
 from .models import AcMode, AcState, FanSpeed
-from .switch import get_main_device_info
+from .switch import get_main_device_info, get_zone_device_info
 
 # Ignore coordinator updates for this many seconds after a command
 OPTIMISTIC_HOLD_SECONDS = 5.0
@@ -41,6 +41,11 @@ FAN_TO_STR = {
 }
 STR_TO_FAN = {v: k for k, v in FAN_TO_STR.items()}
 
+# Zone control mode options
+ZONE_CONTROL_MODE_FAN = "Fan"
+ZONE_CONTROL_MODE_TEMPERATURE = "Temperature"
+ZONE_CONTROL_MODE_OPTIONS = [ZONE_CONTROL_MODE_FAN, ZONE_CONTROL_MODE_TEMPERATURE]
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -52,6 +57,11 @@ async def async_setup_entry(
     for ac in coordinator.data.ac_units:
         entities.append(AirTouch3AcModeSelect(coordinator, ac.ac_number))
         entities.append(AirTouch3AcFanSelect(coordinator, ac.ac_number))
+
+    # Zone control mode selects (only for zones with sensors)
+    for zone in coordinator.data.zones:
+        if zone.has_sensor:
+            entities.append(AirTouch3ZoneControlModeSelect(coordinator, zone.zone_number))
 
     async_add_entities(entities)
 
@@ -176,3 +186,77 @@ class AirTouch3AcFanSelect(CoordinatorEntity[AirTouch3Coordinator], SelectEntity
     def device_info(self) -> DeviceInfo:
         """Device registry info - main device."""
         return get_main_device_info(self.coordinator)
+
+
+class AirTouch3ZoneControlModeSelect(CoordinatorEntity[AirTouch3Coordinator], SelectEntity):
+    """Select entity for zone control mode (Temperature or Fan/%).
+
+    Only available for zones that have a temperature sensor assigned.
+    Uses optimistic updates - when a selection is made, the state
+    immediately shows the expected new value, reverting after timeout if
+    the actual state doesn't change.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Control Mode"
+
+    def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
+        """Initialize zone control mode select."""
+        super().__init__(coordinator)
+        self.zone_number = zone_number
+        self._attr_options = ZONE_CONTROL_MODE_OPTIONS
+        self._optimistic_mode: bool | None = None  # True = temp, False = fan
+        self._optimistic_until: float = 0.0
+
+    @property
+    def current_option(self) -> str | None:
+        """Return current control mode."""
+        # Check optimistic state first
+        if self._optimistic_mode is not None and time.monotonic() < self._optimistic_until:
+            return ZONE_CONTROL_MODE_TEMPERATURE if self._optimistic_mode else ZONE_CONTROL_MODE_FAN
+        self._optimistic_mode = None
+        # Get actual state from coordinator
+        is_temp_mode = self.coordinator.data.zones[self.zone_number].temperature_control
+        return ZONE_CONTROL_MODE_TEMPERATURE if is_temp_mode else ZONE_CONTROL_MODE_FAN
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on current mode."""
+        current = self.current_option
+        return "mdi:thermometer" if current == ZONE_CONTROL_MODE_TEMPERATURE else "mdi:fan"
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator."""
+        if self._optimistic_mode is not None:
+            actual_mode = self.coordinator.data.zones[self.zone_number].temperature_control
+            if time.monotonic() >= self._optimistic_until:
+                # Timeout expired, clear optimistic state
+                self._optimistic_mode = None
+            elif actual_mode == self._optimistic_mode:
+                # Actual state matches expected, clear optimistic state
+                self._optimistic_mode = None
+        super()._handle_coordinator_update()
+
+    async def async_select_option(self, option: str) -> None:
+        """Change the zone control mode."""
+        target_is_temp = option == ZONE_CONTROL_MODE_TEMPERATURE
+        current_is_temp = self.coordinator.data.zones[self.zone_number].temperature_control
+
+        # Only send toggle if we need to change the mode
+        if target_is_temp != current_is_temp:
+            self._optimistic_mode = target_is_temp
+            self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
+            self.async_write_ha_state()
+            await self.coordinator.client.zone_toggle_mode(self.zone_number)
+            await self.coordinator.async_request_refresh()
+
+    @property
+    def unique_id(self) -> str:
+        """Unique ID for zone control mode select."""
+        return f"{self.coordinator.data.device_id}_zone_{self.zone_number}_control_mode"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Device registry info - zone sub-device."""
+        return get_zone_device_info(self.coordinator, self.zone_number)
