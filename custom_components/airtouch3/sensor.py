@@ -199,7 +199,7 @@ class AirTouch3ZoneSetpointSensor(CoordinatorEntity[AirTouch3Coordinator], Senso
     Supports optimistic updates when setpoint buttons are pressed.
     """
 
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None  # Disable LTS - unit changes between °C and % based on mode
     _attr_has_entity_name = True
     _attr_name = "Setpoint"
 

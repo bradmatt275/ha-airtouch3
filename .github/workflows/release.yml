@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+# Prevent concurrent releases
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for tags
+
+      - name: Get latest version and calculate next
+        id: version
+        run: |
+          # Hardcoded major version - change this manually when needed
+          MAJOR=1
+          
+          # Get the latest tag matching our major version
+          LATEST_TAG=$(git tag -l "v${MAJOR}.*" --sort=-v:refname | head -n1)
+          
+          if [ -z "$LATEST_TAG" ]; then
+            # No tags yet for this major version, start at x.0.0
+            MINOR=0
+            PATCH=0
+          else
+            # Extract minor and patch from latest tag (e.g., v1.2.3 -> 2, 3)
+            VERSION_PART=${LATEST_TAG#v${MAJOR}.}
+            MINOR=$(echo $VERSION_PART | cut -d. -f1)
+            PATCH=$(echo $VERSION_PART | cut -d. -f2)
+            
+            # Increment patch version
+            PATCH=$((PATCH + 1))
+          fi
+          
+          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "New version: ${NEW_VERSION}"
+
+      - name: Check if release needed
+        id: check
+        run: |
+          # Check if current commit already has a tag
+          if git describe --exact-match HEAD 2>/dev/null; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Current commit already tagged, skipping release"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update manifest version
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          # Remove 'v' prefix for manifest
+          MANIFEST_VERSION=${VERSION#v}
+          
+          # Update version in manifest.json
+          sed -i "s/\"version\": \".*\"/\"version\": \"${MANIFEST_VERSION}\"/" custom_components/airtouch3/manifest.json
+          
+          # Show the change
+          cat custom_components/airtouch3/manifest.json
+
+      - name: Commit manifest update
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add custom_components/airtouch3/manifest.json
+          git commit -m "Bump version to ${{ steps.version.outputs.version }}" || echo "No changes to commit"
+          git push
+
+      - name: Generate release notes
+        if: steps.check.outputs.skip != 'true'
+        id: notes
+        run: |
+          # Get previous tag
+          PREV_TAG=$(git tag -l "v*" --sort=-v:refname | head -n1)
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "notes=Initial release" >> $GITHUB_OUTPUT
+          else
+            # Generate changelog from commits since last tag
+            CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges | head -20)
+            # Escape for GitHub output
+            CHANGELOG="${CHANGELOG//'%'/'%25'}"
+            CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
+            CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
+            echo "notes=${CHANGELOG}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        if: steps.check.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          body: |
+            ## Changes
+            ${{ steps.notes.outputs.notes }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
