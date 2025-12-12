@@ -508,21 +508,15 @@ class AirTouch3Client:
             is_spill = bool(zone_data & 0x40)
             active_program = (zone_data >> 2) & 0x07
 
-            # Try both data_index and zone_num for feedback to determine correct index
-            feedback_by_data_idx = data[const.OFFSET_ZONE_FEEDBACK + data_index]
-            feedback_by_zone_num = data[const.OFFSET_ZONE_FEEDBACK + zone_num]
-            sensor_source_di = (feedback_by_data_idx >> 5) & 0x07
-            sensor_source_zn = (feedback_by_zone_num >> 5) & 0x07
-            setpoint_di = (feedback_by_data_idx & 0x1F) + 1 if sensor_source_di > 0 else None
-            setpoint_zn = (feedback_by_zone_num & 0x1F) + 1 if sensor_source_zn > 0 else None
-            LOGGER.debug(
-                "Zone %d: feedback[data_idx=%d]=0x%02x setpoint=%s, feedback[zone_num]=0x%02x setpoint=%s",
-                zone_num, data_index, feedback_by_data_idx, setpoint_di, feedback_by_zone_num, setpoint_zn
-            )
-            # Use data_index for now (will fix if zone_num is correct)
-            feedback = feedback_by_data_idx
-            sensor_source = sensor_source_di
-            setpoint = setpoint_di
+            # IMPORTANT: Feedback/setpoint is indexed by zone_num, NOT data_index.
+            # This was verified by testing - data_index gives wrong setpoint values
+            # for zones where data_index != zone_num.
+            feedback = data[const.OFFSET_ZONE_FEEDBACK + zone_num]
+            sensor_source = (feedback >> 5) & 0x07
+            # Setpoint is bits 0-4 + 1 (stored as value - 1)
+            # Testing: 28°C shows as raw 27 in bits 0-4, so we add 1
+            setpoint_raw = feedback & 0x1F
+            setpoint = (setpoint_raw + 1) if sensor_source > 0 else None
 
             # Zone has temperature capability if ANY of these are true:
             # 1. Touchpad 1 or 2 is assigned to this zone

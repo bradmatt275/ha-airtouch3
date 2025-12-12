@@ -197,6 +197,7 @@ class AirTouch3ZoneSetpointSensor(CoordinatorEntity[AirTouch3Coordinator], Senso
 
     Only available for zones that have a temperature sensor assigned.
     Shows the current setpoint when in temperature control mode.
+    Supports optimistic updates when setpoint buttons are pressed.
     """
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
@@ -205,18 +206,52 @@ class AirTouch3ZoneSetpointSensor(CoordinatorEntity[AirTouch3Coordinator], Senso
     _attr_has_entity_name = True
     _attr_name = "Setpoint"
 
+    # Class-level registry for optimistic setpoint values
+    # Maps (device_id, zone_number) -> optimistic_value
+    _optimistic_values: dict[tuple[str, int], int] = {}
+
     def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
         """Initialize setpoint sensor."""
         super().__init__(coordinator)
         self.zone_number = zone_number
 
+    @classmethod
+    def set_optimistic_value(cls, device_id: str, zone_number: int, value: int) -> None:
+        """Set an optimistic setpoint value (called by buttons)."""
+        cls._optimistic_values[(device_id, zone_number)] = value
+
+    @classmethod
+    def clear_optimistic_value(cls, device_id: str, zone_number: int) -> None:
+        """Clear the optimistic value (called after coordinator update)."""
+        cls._optimistic_values.pop((device_id, zone_number), None)
+
+    @property
+    def _optimistic_key(self) -> tuple[str, int]:
+        """Get the key for optimistic value lookup."""
+        return (self.coordinator.data.device_id, self.zone_number)
+
     @property
     def native_value(self) -> float | None:
-        """Return current setpoint temperature."""
+        """Return current setpoint temperature, preferring optimistic value."""
+        # Check for optimistic value first
+        optimistic = self._optimistic_values.get(self._optimistic_key)
+        if optimistic is not None:
+            return float(optimistic)
+
+        # Fall back to actual value
         zone = self.coordinator.data.zones[self.zone_number]
         if zone.setpoint is not None:
             return float(zone.setpoint)
         return None
+
+    def _handle_coordinator_update(self) -> None:
+        """Handle coordinator update - clear optimistic value if actual matches."""
+        zone = self.coordinator.data.zones[self.zone_number]
+        optimistic = self._optimistic_values.get(self._optimistic_key)
+        if optimistic is not None and zone.setpoint == optimistic:
+            # Actual value now matches optimistic, clear it
+            self.clear_optimistic_value(*self._optimistic_key)
+        super()._handle_coordinator_update()
 
     @property
     def available(self) -> bool:

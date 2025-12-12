@@ -11,8 +11,9 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, MIN_TEMP, MAX_TEMP
 from .coordinator import AirTouch3Coordinator
+from .sensor import AirTouch3ZoneSetpointSensor
 from .switch import get_zone_device_info
 
 LOGGER = logging.getLogger(__name__)
@@ -52,6 +53,16 @@ class AirTouch3SetpointUpButton(CoordinatorEntity[AirTouch3Coordinator], ButtonE
     async def async_press(self) -> None:
         """Handle button press - increase setpoint."""
         LOGGER.debug("Setpoint UP pressed for zone %d", self.zone_number)
+
+        # Set optimistic value immediately
+        zone = self.coordinator.data.zones[self.zone_number]
+        if zone.setpoint is not None:
+            new_setpoint = min(zone.setpoint + 1, MAX_TEMP)
+            AirTouch3ZoneSetpointSensor.set_optimistic_value(
+                self.coordinator.data.device_id, self.zone_number, new_setpoint
+            )
+            self.coordinator.async_set_updated_data(self.coordinator.data)
+
         await self.coordinator.client.zone_value_up(self.zone_number)
         await self.coordinator.async_request_refresh()
 
@@ -84,6 +95,16 @@ class AirTouch3SetpointDownButton(CoordinatorEntity[AirTouch3Coordinator], Butto
     async def async_press(self) -> None:
         """Handle button press - decrease setpoint."""
         LOGGER.debug("Setpoint DOWN pressed for zone %d", self.zone_number)
+
+        # Set optimistic value immediately
+        zone = self.coordinator.data.zones[self.zone_number]
+        if zone.setpoint is not None:
+            new_setpoint = max(zone.setpoint - 1, MIN_TEMP)
+            AirTouch3ZoneSetpointSensor.set_optimistic_value(
+                self.coordinator.data.device_id, self.zone_number, new_setpoint
+            )
+            self.coordinator.async_set_updated_data(self.coordinator.data)
+
         await self.coordinator.client.zone_value_down(self.zone_number)
         await self.coordinator.async_request_refresh()
 

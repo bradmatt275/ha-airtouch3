@@ -6,6 +6,41 @@ This document describes the reverse-engineered TCP protocol used by the Polyaire
 
 ---
 
+## CRITICAL: Zone Data Indexing
+
+**This is the most important concept in the protocol - getting this wrong causes subtle bugs!**
+
+The AirTouch 3 protocol uses TWO different indexing schemes for zone data:
+
+### 1. `data_index` (from Group Data)
+Derived from Group Data bytes at offset 264. Extract with: `(group_byte >> 4) & 0x0F`
+
+**Used for:**
+- Zone Data byte (offset 232 + data_index)
+- Damper percentage value (bits 0-6 of byte at offset 248 + data_index)
+
+### 2. `zone_num` (sequential zone number)
+Simple sequential numbering: Zone 0, Zone 1, Zone 2, etc.
+
+**Used for:**
+- Temperature control mode flag (bit 7 of byte at offset 248 + zone_num)
+- Feedback/setpoint byte (offset 296 + zone_num)
+- All zone commands (zone_num is the parameter sent to the device)
+
+### Why This Matters
+
+For many installations, `data_index == zone_num`, so bugs may not be apparent. But when they differ:
+
+| Zone Name | zone_num | data_index | Issue if wrong index used |
+|-----------|----------|------------|---------------------------|
+| Living    | 0        | 0          | None (same) |
+| TV room   | 1        | 2          | Wrong setpoint, wrong control mode |
+| Master    | 2        | 3          | Wrong setpoint, wrong control mode |
+
+**Verified via Wireshark captures** comparing Android app behavior to our implementation.
+
+---
+
 ## Connection Information
 
 | Parameter | Value |
@@ -443,6 +478,8 @@ Bits 0-3 (`byte & 0x0F`): Reference index into Zone Data array.
 | 5-7 | Temperature sensor source (`(byte >> 5) & 0x07`) |
 | 0-4 | Zone setpoint temperature - 1 (`byte & 0x1F`, then `+1` for actual temp) |
 
+**IMPORTANT: This data is indexed by `zone_num`, NOT by `data_index`!**
+
 **Sensor source values (mask `(byte >> 5) & 0x07`):**
 - `0` = No temperature display
 - `1` = Use sensor 1 (touchpad takes priority if assigned)
@@ -452,9 +489,13 @@ Bits 0-3 (`byte & 0x0F`): Reference index into Zone Data array.
 
 **Zone setpoint parsing:**
 ```python
+# CORRECT: Use zone_num (sequential zone number 0, 1, 2...)
 feedback_byte = state[296 + zone_num]
 sensor_source = (feedback_byte >> 5) & 0x07
-zone_setpoint = (feedback_byte & 0x1F) + 1
+zone_setpoint = (feedback_byte & 0x1F) + 1 if sensor_source > 0 else None
+
+# WRONG: Do NOT use data_index here - it gives incorrect values!
+# feedback_byte = state[296 + data_index]  # INCORRECT!
 ```
 
 ---
@@ -1699,6 +1740,7 @@ This documentation is based on reverse engineering of the AirTouch 3 Android app
 
 ## Version History
 
+- **v1.3** (2025-12-12): Added prominent CRITICAL section at top explaining zone_num vs data_index indexing. Documented that setpoint/feedback (offset 296) also uses zone_num, not data_index. Added setpoint formula correction (+1 offset verified by testing).
 - **v1.2** (2025-12-12): Documented critical indexing difference for zone damper bytes - temperature control mode (bit 7) is indexed by zone_num, while damper percentage (bits 0-6) is indexed by data_index. Verified via Wireshark captures.
 - **v1.1** (2025-12-12): Added zone control mode toggle and value adjustment commands, sensor capability detection
 - **v1.0** (2025-12-10): Initial documentation based on AirTouch3 v2.12 APK decompilation

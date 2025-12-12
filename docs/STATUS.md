@@ -18,10 +18,13 @@
   - Uses bit 7 of zone_data byte for ON/OFF state (matching Android app)
   - Optimistic updates with 5-second hold
   - Extra attributes: damper_percent, is_spill, active_program, sensor_source
-- **Zone Setpoint Number**: Adjust zone value (temperature or damper %)
-  - Dynamically switches between °C and % based on control mode
-  - Uses increment/decrement commands to reach target value
-  - **Known Issue**: Not currently working - see Known Issues section
+- **Setpoint Up/Down Buttons**: Increment/decrement zone setpoint by 1°C
+  - Only appears for zones with temperature sensors
+  - Uses optimistic updates for immediate UI feedback
+  - Simpler than number entity since AirTouch 3 only supports step commands
+- **Setpoint Sensor**: Read-only display of current zone setpoint
+  - Only appears for zones with temperature sensors
+  - Supports optimistic updates (shows expected value immediately when buttons pressed)
 - **Control Mode Select**: Dropdown to choose between Temperature and Fan modes
   - Only appears for zones with temperature sensors
   - Temperature = zone targets a setpoint, Fan = zone uses fixed damper %
@@ -58,13 +61,35 @@ Zones are now represented as sub-devices for cleaner organization in Home Assist
 |-------------|-------------|
 | `switch` | Zone power ON/OFF |
 | `select` | Control Mode (Fan/Temperature) - zones with sensors only |
-| `number` | Zone setpoint (°C or %) |
+| `button` | Setpoint Up (+1°C) - zones with sensors only |
+| `button` | Setpoint Down (-1°C) - zones with sensors only |
+| `sensor` | Setpoint (current target temperature) - zones with sensors only |
 | `sensor` | Zone temperature |
 | `sensor` | Zone damper percentage |
 
-**Note**: The `climate` entity was removed in favor of simpler switch/select/number entities because the AirTouch 3 doesn't fit the standard HVAC model well (separate power toggle, temperature in steps only, per-zone temperature control).
+**Note**: The `climate` entity was removed in favor of simpler switch/select/button entities because the AirTouch 3 doesn't fit the standard HVAC model well (separate power toggle, temperature in steps only, per-zone temperature control).
 
 ## Key Protocol Discoveries
+
+### CRITICAL: Zone Data Indexing
+
+The AirTouch 3 protocol uses TWO different indexing schemes for zone data, which caused many bugs:
+
+1. **`data_index`**: Derived from Group Data bytes (offset 264+). Used for:
+   - Zone data byte (offset 232 + data_index)
+   - Damper percentage value (bits 0-6 of byte at offset 248 + data_index)
+
+2. **`zone_num`**: Sequential zone number (0, 1, 2...). Used for:
+   - Temperature control mode flag (bit 7 of byte at offset 248 + zone_num)
+   - Feedback/setpoint byte (offset 280 + zone_num)
+   - Zone toggle commands (zone_num is sent in the command)
+
+**Why this matters**: For zones where `data_index != zone_num`, using the wrong index gives incorrect values. For example:
+- Zone 0 (Living): data_index=0, zone_num=0 → same, no issue
+- Zone 1 (TV room): data_index=2, zone_num=1 → DIFFERENT!
+- Zone 2 (Master): data_index=3, zone_num=2 → DIFFERENT!
+
+This was verified via Wireshark captures comparing Android app state reads.
 
 ### AC Power Status (Byte 423/424)
 - **Bit 7** contains power state, NOT bit 0
@@ -78,10 +103,24 @@ Zones are now represented as sub-devices for cleaner organization in Home Assist
 - Damper position reflects the airflow percentage but does NOT indicate ON/OFF state
 - **Note**: Zone state reflects the *requested* state, not whether air is currently flowing. A zone can show ON even if the AC is off - this means the zone will receive air when the AC turns on.
 
+### Setpoint Parsing
+- Located at offset 280 + **zone_num** (NOT data_index!)
+- Feedback byte structure:
+  - Bits 5-7: Sensor source (0 = no sensor, >0 = has sensor)
+  - Bits 0-4: Setpoint raw value
+- Setpoint formula: `(feedback & 0x1F) + 1` if sensor_source > 0, else None
+- The +1 offset was verified by testing (28°C stored as 27 in bits 0-4)
+
 ### Fan Speed Encoding
 - Auto = 0 (or 4 for Brand 15)
 - Low = 1, Medium = 2, High = 3, Powerful = 4
 - Brand 2 with supported=4: add 1 to value
+
+### Zone Commands
+All zone commands use `zone_num` (not data_index):
+- Toggle mode: `55 81 0c [zone_num] 80 01 00 00 00 00 00 00 [checksum]`
+- Value up: `55 81 0c [zone_num] 02 01 00 00 00 00 00 00 [checksum]`
+- Value down: `55 81 0c [zone_num] 01 01 00 00 00 00 00 00 [checksum]`
 
 ## Resolved Issues
 
@@ -92,29 +131,32 @@ Zones are now represented as sub-devices for cleaner organization in Home Assist
 5. **Wireless sensor wrong temps**: Fixed bit layout (7=available, 6=low_battery, 0-5=temp)
 6. **Fan speed off-by-one**: Fixed encoding/decoding to match app's `formatFanSpeed()`
 7. **Climate entity power issues**: Replaced with simpler switch/select entities
-8. **Zone control mode not updating**: Temperature control mode (bit 7) is indexed by `zone_num`, not `data_index`. Verified via Wireshark captures comparing Android app state reads.
+8. **Zone control mode not updating for some zones**: Fixed by using `zone_num` instead of `data_index` for temperature control mode flag
+9. **Zone setpoint reading wrong values**: Fixed by using `zone_num` instead of `data_index` for feedback/setpoint byte
+10. **Setpoint number entity causing runaway commands**: Replaced with simpler up/down buttons since AirTouch 3 only supports step commands (not direct value setting)
 
 ## Files Modified
 
-- `client.py` - Protocol parsing with corrected bit masks, zone control commands. Important: temperature control mode (bit 7 of damper byte) is indexed by `zone_num`, not `data_index`
+- `client.py` - Protocol parsing with corrected bit masks and indexing, zone control commands
+  - **Critical**: Uses `zone_num` for temperature_control flag and setpoint, `data_index` for damper percentage
 - `switch.py` - Zone switches + AC power switch with optimistic updates
 - `select.py` - AC mode/fan speed selects + Zone control mode select (Fan/Temperature)
-- `sensor.py` - Zone temperature and damper sensors with source priority
-- `number.py` - Zone setpoint control (temperature or damper %) - currently not working
+- `sensor.py` - Zone temperature, damper, and setpoint sensors with source priority and optimistic updates
+- `button.py` - Setpoint up/down buttons with optimistic updates
 - `models.py` - Added `temperature_control` and `has_sensor` fields to ZoneState
-- `const.py` - Added zone command constants
+- `const.py` - Added zone command constants (ZONE_TOGGLE, ZONE_DAMPER_UP, ZONE_DAMPER_DOWN, etc.)
 - `coordinator.py` - Uses `refresh_state()` for fresh data
-- `__init__.py` - Platform setup (switch, select, sensor, number)
+- `__init__.py` - Platform setup (switch, select, sensor, button)
 
 ## Known Issues
 
-- **Zone setpoint not working**: The number entity for zone setpoint (temperature or damper %) is not functioning correctly. The AirTouch 3 uses step up/down commands rather than direct value setting, and the current implementation may not be sending the correct commands or handling the response properly. Needs investigation.
 - **State inconsistencies**: Toggle commands sometimes don't take effect, possibly due to timing or protocol quirks. May need retry logic or adjusted optimistic hold periods.
 - **Toggle protocol challenges**: The AirTouch 3 uses toggle commands rather than explicit on/off, which can cause issues if state gets out of sync.
 
 ## Future Improvements
 
 ### Potential Additions
+- [ ] Damper percentage control (up/down buttons similar to setpoint)
 - [ ] AC timer configuration entities
 - [ ] Program/schedule configuration
 - [ ] Favorite scene activation
@@ -139,8 +181,28 @@ logger:
 ### Key Log Lines
 - `AC X: status_byte=0xXX (...), power_on=X (bit7)` - AC status parsing
 - `Zone X: ... damper_raw=X (X%)` - Zone state with damper position
+- `Zone X: feedback[data_idx=X]=0xXX setpoint=X, feedback[zone_num]=0xXX setpoint=X` - Setpoint parsing comparison (for debugging indexing issues)
 - `Touchpad X: ... temp_value=X` - Touchpad temperature parsing
 - `Wireless Sensor X: ... temp=X` - Wireless sensor parsing
+- `Setpoint UP/DOWN pressed for zone X` - Button press events
+- `Zone X value UP/DOWN command: XX XX XX...` - Raw command bytes being sent
+
+### Testing Methodology for Index Issues
+If you suspect an indexing issue (data_index vs zone_num), add debug logging that reads from both indexes and compares:
+```python
+LOGGER.debug(
+    "Zone %d: value[data_idx=%d]=0x%02x, value[zone_num]=0x%02x",
+    zone_num, data_index, data[offset + data_index], data[offset + zone_num]
+)
+```
+Then compare with actual values shown in the Android app or on the physical unit.
+
+### Wireshark Capture Tips
+To capture and analyze AirTouch 3 protocol:
+1. Filter by `tcp.port == 8899`
+2. The state message is 492 bytes
+3. Commands are 13 bytes starting with `55`
+4. Follow TCP stream and export as hex to analyze byte offsets
 
 ### Reinstalling After Changes
 After code changes, you may need to:
