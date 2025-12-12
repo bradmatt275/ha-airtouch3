@@ -126,15 +126,11 @@ class AirTouch3ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
         """Return the options flow."""
-        return AirTouch3OptionsFlow(config_entry)
+        return AirTouch3OptionsFlow()
 
 
 class AirTouch3OptionsFlow(config_entries.OptionsFlow):
     """Handle AirTouch 3 options."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Store reference to config entry."""
-        super().__init__(config_entry)
 
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         """Handle options step."""

@@ -28,7 +28,7 @@ def get_zone_device_info(coordinator: AirTouch3Coordinator, zone_number: int) ->
     zone = coordinator.data.zones[zone_number]
     return DeviceInfo(
         identifiers={(DOMAIN, f"{coordinator.data.device_id}_zone_{zone_number}")},
-        name=zone.name,
+        name=f"AirTouch3 {zone.name}",
         manufacturer="Polyaire",
         model="AirTouch 3 Zone",
         via_device=(DOMAIN, coordinator.data.device_id),
@@ -39,7 +39,7 @@ def get_main_device_info(coordinator: AirTouch3Coordinator) -> DeviceInfo:
     """Get device info for the main AirTouch 3 device."""
     return DeviceInfo(
         identifiers={(DOMAIN, coordinator.data.device_id)},
-        name=coordinator.data.system_name,
+        name=f"AirTouch3 {coordinator.data.system_name}",
         manufacturer="Polyaire",
         model="AirTouch 3",
     )
