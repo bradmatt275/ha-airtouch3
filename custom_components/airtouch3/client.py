@@ -223,6 +223,11 @@ class AirTouch3Client:
         command = self._create_command(
             const.CMD_ZONE, zone_index, const.ZONE_TOGGLE, const.ZONE_MODE_TOGGLE
         )
+        LOGGER.debug(
+            "Zone %d mode toggle command: %s",
+            zone_index,
+            " ".join(f"{b:02x}" for b in command),
+        )
         return (await self._send_command(command)) is not None
 
     async def zone_set_value(self, zone_index: int, target: int, is_temperature: bool) -> bool:
@@ -345,7 +350,7 @@ class AirTouch3Client:
 
     def _parse_state(self, data: bytes) -> SystemState:
         """Parse 492-byte state message into a SystemState."""
-        LOGGER.debug("Parsing state message (%d bytes)", len(data))
+        # LOGGER.debug("Parsing state message (%d bytes)", len(data))
         device_id = "".join(str(data[i] & 0x0F) for i in range(const.OFFSET_DEVICE_ID, const.OFFSET_DEVICE_ID + 8))
         system_name = bytes(
             data[const.OFFSET_SYSTEM_NAME : const.OFFSET_SYSTEM_NAME + const.STATE_SYSTEM_NAME_LENGTH]
@@ -360,11 +365,11 @@ class AirTouch3Client:
             # Bit 1 is error flag
             power_on = bool(status & 0x80)
             has_error = bool(status & 0x02)
-            if LOGGER.isEnabledFor(logging.DEBUG):
-                LOGGER.debug(
-                    "AC %d: status_byte=0x%02x (%s), power_on=%s (bit7), has_error=%s (bit1)",
-                    ac_num + 1, status, format(status, '08b'), power_on, has_error
-                )
+            # if LOGGER.isEnabledFor(logging.DEBUG):
+            #     LOGGER.debug(
+            #         "AC %d: status_byte=0x%02x (%s), power_on=%s (bit7), has_error=%s (bit1)",
+            #         ac_num + 1, status, format(status, '08b'), power_on, has_error
+            #     )
 
             brand_id = data[const.OFFSET_AC_BRAND + ac_num]
             unit_id = data[const.OFFSET_AC_UNIT_ID + ac_num]
@@ -484,25 +489,6 @@ class AirTouch3Client:
                     has_sensor=has_sensor,
                 )
             )
-            if LOGGER.isEnabledFor(logging.DEBUG):
-                LOGGER.debug(
-                    "Zone %s (group %s -> data %s): zone_data=0x%02x on=%s, damper_byte=0x%02x (%s%%) temp_ctrl=%s, feedback=0x%02x sensor_src=%s has_touchpad=%s has_wireless=%s/%s has_sensor=%s",
-                    name or zone_num,
-                    zone_num,
-                    data_index,
-                    zone_data,
-                    is_on,
-                    damper_byte,
-                    damper_percent,
-                    temperature_control,
-                    feedback,
-                    sensor_source,
-                    has_touchpad,
-                    has_wireless_sensor1,
-                    has_wireless_sensor2,
-                    has_sensor,
-                )
-
         touchpads: list[TouchpadState] = []
         for tp_index in range(const.STATE_TOUCHPAD_COUNT):
             zone_assign = data[const.OFFSET_TOUCHPAD_ZONE + tp_index]
@@ -517,15 +503,6 @@ class AirTouch3Client:
                     temperature=temp_value if temp_value > 0 else None,
                 )
             )
-            if LOGGER.isEnabledFor(logging.DEBUG):
-                LOGGER.debug(
-                    "Touchpad %d: zone_assign=%d, temp_raw=0x%02x (%d), temp_value=%d",
-                    tp_index + 1,
-                    zone_assign,
-                    temp_raw,
-                    temp_raw,
-                    temp_value,
-                )
 
         sensors: list[SensorState] = []
         for sensor_index in range(const.STATE_SENSOR_SLOTS):
@@ -541,32 +518,6 @@ class AirTouch3Client:
                     low_battery=low_battery,
                     temperature=temperature,
                 )
-            )
-            if LOGGER.isEnabledFor(logging.DEBUG) and available:
-                LOGGER.debug(
-                    "Wireless Sensor %d: raw=0x%02x (%d), available=%s, low_battery=%s, temp=%d",
-                    sensor_index + 1,
-                    raw,
-                    raw,
-                    available,
-                    low_battery,
-                    temperature,
-                )
-
-        if LOGGER.isEnabledFor(logging.DEBUG):
-            zone_bytes = data[const.OFFSET_ZONE_DATA : const.OFFSET_ZONE_DATA + const.STATE_ZONE_MAX]
-            group_bytes = data[const.OFFSET_GROUP_DATA : const.OFFSET_GROUP_DATA + const.STATE_ZONE_MAX]
-            touchpad_bytes = data[const.OFFSET_TOUCHPAD_ZONE : const.OFFSET_TOUCHPAD_ZONE + 4]
-            sensor_bytes = data[const.OFFSET_WIRELESS_SENSORS : const.OFFSET_WIRELESS_SENSORS + 16]
-            LOGGER.debug(
-                "Zone data bytes: %s; Group data bytes: %s",
-                " ".join(f"{b:02x}" for b in zone_bytes),
-                " ".join(f"{b:02x}" for b in group_bytes),
-            )
-            LOGGER.debug(
-                "Touchpad bytes (443-446): %s; Sensor bytes (451-466): %s",
-                " ".join(f"{b:02x}" for b in touchpad_bytes),
-                " ".join(f"{b:02x}" for b in sensor_bytes),
             )
 
         return SystemState(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -12,6 +14,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import AirTouch3Coordinator
 from .switch import get_zone_device_info
+
+LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -47,13 +51,27 @@ class AirTouch3ZoneModeToggleButton(CoordinatorEntity[AirTouch3Coordinator], But
 
     async def async_press(self) -> None:
         """Handle button press - send toggle command."""
-        await self.coordinator.client.zone_toggle_mode(self.zone_number)
+        current_mode = self.coordinator.data.zones[self.zone_number].temperature_control
+        LOGGER.debug(
+            "Button pressed for zone %d, current temp_ctrl=%s, sending toggle",
+            self.zone_number,
+            current_mode,
+        )
+        result = await self.coordinator.client.zone_toggle_mode(self.zone_number)
+        LOGGER.debug("Toggle command result: %s", result)
         # Trigger optimistic update on the control mode sensor
         self.coordinator.set_optimistic_control_mode(
             self.zone_number,
-            not self.coordinator.data.zones[self.zone_number].temperature_control
+            not current_mode
         )
+        # The toggle command already returns updated state, so just request
+        # a refresh to update the coordinator data
         await self.coordinator.async_request_refresh()
+        LOGGER.debug(
+            "After refresh, zone %d temp_ctrl=%s",
+            self.zone_number,
+            self.coordinator.data.zones[self.zone_number].temperature_control,
+        )
 
     @property
     def unique_id(self) -> str:
