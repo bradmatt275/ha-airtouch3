@@ -21,9 +21,12 @@
 - **Zone Setpoint Number**: Adjust zone value (temperature or damper %)
   - Dynamically switches between °C and % based on control mode
   - Uses increment/decrement commands to reach target value
-- **Temp Control Switch**: Toggle between temperature and percentage modes
+  - **Known Issue**: Not currently working - see Known Issues section
+- **Control Mode Select**: Dropdown to choose between Temperature and Fan modes
   - Only appears for zones with temperature sensors
-  - ON = temperature setpoint mode, OFF = damper percentage mode
+  - Temperature = zone targets a setpoint, Fan = zone uses fixed damper %
+  - Uses optimistic updates with 5-second hold
+  - Dynamic icon (thermometer/fan) based on current mode
 - **Damper Sensor**: Shows current damper opening percentage
 
 ### Temperature Sensors
@@ -54,7 +57,7 @@ Zones are now represented as sub-devices for cleaner organization in Home Assist
 | Entity Type | Description |
 |-------------|-------------|
 | `switch` | Zone power ON/OFF |
-| `switch` | Temp Control mode toggle (zones with sensors only) |
+| `select` | Control Mode (Fan/Temperature) - zones with sensors only |
 | `number` | Zone setpoint (°C or %) |
 | `sensor` | Zone temperature |
 | `sensor` | Zone damper percentage |
@@ -89,14 +92,15 @@ Zones are now represented as sub-devices for cleaner organization in Home Assist
 5. **Wireless sensor wrong temps**: Fixed bit layout (7=available, 6=low_battery, 0-5=temp)
 6. **Fan speed off-by-one**: Fixed encoding/decoding to match app's `formatFanSpeed()`
 7. **Climate entity power issues**: Replaced with simpler switch/select entities
+8. **Zone control mode not updating**: Temperature control mode (bit 7) is indexed by `zone_num`, not `data_index`. Verified via Wireshark captures comparing Android app state reads.
 
 ## Files Modified
 
-- `client.py` - Protocol parsing with corrected bit masks, zone control commands
-- `switch.py` - Zone switches + AC power switch + Temp Control mode switch with optimistic updates
-- `select.py` - AC mode and fan speed select entities
+- `client.py` - Protocol parsing with corrected bit masks, zone control commands. Important: temperature control mode (bit 7 of damper byte) is indexed by `zone_num`, not `data_index`
+- `switch.py` - Zone switches + AC power switch with optimistic updates
+- `select.py` - AC mode/fan speed selects + Zone control mode select (Fan/Temperature)
 - `sensor.py` - Zone temperature and damper sensors with source priority
-- `number.py` - Zone setpoint control (temperature or damper %)
+- `number.py` - Zone setpoint control (temperature or damper %) - currently not working
 - `models.py` - Added `temperature_control` and `has_sensor` fields to ZoneState
 - `const.py` - Added zone command constants
 - `coordinator.py` - Uses `refresh_state()` for fresh data
@@ -104,6 +108,7 @@ Zones are now represented as sub-devices for cleaner organization in Home Assist
 
 ## Known Issues
 
+- **Zone setpoint not working**: The number entity for zone setpoint (temperature or damper %) is not functioning correctly. The AirTouch 3 uses step up/down commands rather than direct value setting, and the current implementation may not be sending the correct commands or handling the response properly. Needs investigation.
 - **State inconsistencies**: Toggle commands sometimes don't take effect, possibly due to timing or protocol quirks. May need retry logic or adjusted optimistic hold periods.
 - **Toggle protocol challenges**: The AirTouch 3 uses toggle commands rather than explicit on/off, which can cause issues if state gets out of sync.
 

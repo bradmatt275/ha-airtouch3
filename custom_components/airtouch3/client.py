@@ -204,19 +204,51 @@ class AirTouch3Client:
         LOGGER.error("Failed to reach target damper %s", target_percent)
         return False
 
-    async def zone_value_up(self, zone_index: int) -> bool:
-        """Increase zone value (temperature or damper percent, depending on mode)."""
+    async def zone_value_up(self, zone_index: int) -> Optional[SystemState]:
+        """Increase zone value (temperature or damper percent, depending on mode).
+
+        Returns the updated SystemState, or None on failure.
+        """
         command = self._create_command(
             const.CMD_ZONE, zone_index, const.ZONE_DAMPER_UP, const.ZONE_VALUE_ADJUST
         )
-        return (await self._send_command(command)) is not None
+        LOGGER.debug(
+            "Zone %d value UP command: %s",
+            zone_index,
+            " ".join(f"{b:02x}" for b in command),
+        )
+        result = await self._send_command(command)
+        if result:
+            LOGGER.debug(
+                "Zone %d after UP: setpoint=%s, damper=%d%%",
+                zone_index,
+                result.zones[zone_index].setpoint,
+                result.zones[zone_index].damper_percent,
+            )
+        return result
 
-    async def zone_value_down(self, zone_index: int) -> bool:
-        """Decrease zone value (temperature or damper percent, depending on mode)."""
+    async def zone_value_down(self, zone_index: int) -> Optional[SystemState]:
+        """Decrease zone value (temperature or damper percent, depending on mode).
+
+        Returns the updated SystemState, or None on failure.
+        """
         command = self._create_command(
             const.CMD_ZONE, zone_index, const.ZONE_DAMPER_DOWN, const.ZONE_VALUE_ADJUST
         )
-        return (await self._send_command(command)) is not None
+        LOGGER.debug(
+            "Zone %d value DOWN command: %s",
+            zone_index,
+            " ".join(f"{b:02x}" for b in command),
+        )
+        result = await self._send_command(command)
+        if result:
+            LOGGER.debug(
+                "Zone %d after DOWN: setpoint=%s, damper=%d%%",
+                zone_index,
+                result.zones[zone_index].setpoint,
+                result.zones[zone_index].damper_percent,
+            )
+        return result
 
     async def zone_toggle_mode(self, zone_index: int) -> bool:
         """Toggle zone between temperature and percentage control modes."""
@@ -238,12 +270,19 @@ class AirTouch3Client:
             target: Target value (temperature in °C or damper percent)
             is_temperature: True if setting temperature, False for damper percent
         """
+        mode_str = "temperature" if is_temperature else "damper"
+        LOGGER.debug("zone_set_value: zone=%d, target=%d, mode=%s", zone_index, target, mode_str)
+
+        # Get initial state
+        state = await self.get_state()
+        if state is None:
+            LOGGER.error("zone_set_value: Failed to get initial state")
+            return False
+
         max_iterations = 25 if is_temperature else 25
-        for _ in range(max_iterations):
-            state = await self.get_state()
-            if state is None:
-                return False
+        for iteration in range(max_iterations):
             if zone_index >= len(state.zones):
+                LOGGER.error("zone_set_value: Zone index %d out of range", zone_index)
                 return False
             zone = state.zones[zone_index]
 
@@ -256,14 +295,26 @@ class AirTouch3Client:
             else:
                 current = zone.damper_percent
 
+            LOGGER.debug(
+                "zone_set_value: iteration=%d, current=%d, target=%d",
+                iteration, current, target
+            )
+
             if current == target:
+                LOGGER.debug("zone_set_value: Target reached!")
                 return True
 
             if current < target:
-                if not await self.zone_value_up(zone_index):
+                LOGGER.debug("zone_set_value: Sending value UP command")
+                state = await self.zone_value_up(zone_index)
+                if state is None:
+                    LOGGER.error("zone_set_value: zone_value_up failed")
                     return False
             else:
-                if not await self.zone_value_down(zone_index):
+                LOGGER.debug("zone_set_value: Sending value DOWN command")
+                state = await self.zone_value_down(zone_index)
+                if state is None:
+                    LOGGER.error("zone_set_value: zone_value_down failed")
                     return False
 
         LOGGER.error("Failed to reach target value %s for zone %s", target, zone_index)
@@ -457,9 +508,21 @@ class AirTouch3Client:
             is_spill = bool(zone_data & 0x40)
             active_program = (zone_data >> 2) & 0x07
 
-            feedback = data[const.OFFSET_ZONE_FEEDBACK + data_index]
-            sensor_source = (feedback >> 5) & 0x07
-            setpoint = (feedback & 0x1F) + 1 if sensor_source > 0 else None
+            # Try both data_index and zone_num for feedback to determine correct index
+            feedback_by_data_idx = data[const.OFFSET_ZONE_FEEDBACK + data_index]
+            feedback_by_zone_num = data[const.OFFSET_ZONE_FEEDBACK + zone_num]
+            sensor_source_di = (feedback_by_data_idx >> 5) & 0x07
+            sensor_source_zn = (feedback_by_zone_num >> 5) & 0x07
+            setpoint_di = (feedback_by_data_idx & 0x1F) + 1 if sensor_source_di > 0 else None
+            setpoint_zn = (feedback_by_zone_num & 0x1F) + 1 if sensor_source_zn > 0 else None
+            LOGGER.debug(
+                "Zone %d: feedback[data_idx=%d]=0x%02x setpoint=%s, feedback[zone_num]=0x%02x setpoint=%s",
+                zone_num, data_index, feedback_by_data_idx, setpoint_di, feedback_by_zone_num, setpoint_zn
+            )
+            # Use data_index for now (will fix if zone_num is correct)
+            feedback = feedback_by_data_idx
+            sensor_source = sensor_source_di
+            setpoint = setpoint_di
 
             # Zone has temperature capability if ANY of these are true:
             # 1. Touchpad 1 or 2 is assigned to this zone

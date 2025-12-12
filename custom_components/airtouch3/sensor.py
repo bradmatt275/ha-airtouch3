@@ -35,10 +35,13 @@ async def async_setup_entry(
     for ac in coordinator.data.ac_units:
         entities.append(AirTouch3AcTemperatureSensor(coordinator, ac.ac_number))
 
-    # Zone damper percentage and temperature
+    # Zone damper percentage, temperature, and setpoint
     for zone in coordinator.data.zones:
         entities.append(AirTouch3DamperSensor(coordinator, zone.zone_number))
         entities.append(AirTouch3ZoneTemperatureSensor(coordinator, zone.zone_number))
+        # Setpoint sensor only for zones with temperature sensors
+        if zone.has_sensor:
+            entities.append(AirTouch3ZoneSetpointSensor(coordinator, zone.zone_number))
 
     async_add_entities(entities)
 
@@ -182,6 +185,57 @@ class AirTouch3DamperSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntit
     def unique_id(self) -> str:
         """Return unique ID."""
         return f"{self.coordinator.data.device_id}_zone_{self.zone_number}_damper"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Device registry info - zone sub-device."""
+        return get_zone_device_info(self.coordinator, self.zone_number)
+
+
+class AirTouch3ZoneSetpointSensor(CoordinatorEntity[AirTouch3Coordinator], SensorEntity):
+    """Setpoint sensor for a zone (read-only display of target temperature).
+
+    Only available for zones that have a temperature sensor assigned.
+    Shows the current setpoint when in temperature control mode.
+    """
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_has_entity_name = True
+    _attr_name = "Setpoint"
+
+    def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
+        """Initialize setpoint sensor."""
+        super().__init__(coordinator)
+        self.zone_number = zone_number
+
+    @property
+    def native_value(self) -> float | None:
+        """Return current setpoint temperature."""
+        zone = self.coordinator.data.zones[self.zone_number]
+        if zone.setpoint is not None:
+            return float(zone.setpoint)
+        return None
+
+    @property
+    def available(self) -> bool:
+        """Return True if zone has a setpoint (temperature mode with sensor)."""
+        zone = self.coordinator.data.zones[self.zone_number]
+        return zone.setpoint is not None
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on control mode."""
+        zone = self.coordinator.data.zones[self.zone_number]
+        if zone.temperature_control:
+            return "mdi:thermometer"
+        return "mdi:thermometer-off"
+
+    @property
+    def unique_id(self) -> str:
+        """Return unique ID."""
+        return f"{self.coordinator.data.device_id}_zone_{self.zone_number}_setpoint"
 
     @property
     def device_info(self) -> DeviceInfo:
