@@ -79,7 +79,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add custom_components/airtouch3/manifest.json
-          git commit -m "Bump version to ${{ steps.version.outputs.version }}" || echo "No changes to commit"
+          
+          # Get the changelog for commit message
+          PREV_TAG=$(git tag -l "v*" --sort=-v:refname | head -n1)
+          if [ -z "$PREV_TAG" ]; then
+            CHANGELOG="Initial release"
+          else
+            CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges | head -20)
+          fi
+          
+          # Create commit with version and changelog
+          git commit -m "Bump version to ${{ steps.version.outputs.version }}:" -m "${CHANGELOG}" || echo "No changes to commit"
           git push
 
       - name: Generate release notes
@@ -90,16 +100,16 @@ jobs:
           PREV_TAG=$(git tag -l "v*" --sort=-v:refname | head -n1)
           
           if [ -z "$PREV_TAG" ]; then
-            echo "notes=Initial release" >> $GITHUB_OUTPUT
+            NOTES="Initial release"
           else
             # Generate changelog from commits since last tag
-            CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges | head -20)
-            # Escape for GitHub output
-            CHANGELOG="${CHANGELOG//'%'/'%25'}"
-            CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
-            CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
-            echo "notes=${CHANGELOG}" >> $GITHUB_OUTPUT
+            NOTES=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges | head -20)
           fi
+          
+          # Use EOF delimiter to handle multiline output properly
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release
         if: steps.check.outputs.skip != 'true'

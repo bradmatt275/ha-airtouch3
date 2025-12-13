@@ -206,6 +206,14 @@ class AirTouch3ZoneControlModeSelect(CoordinatorEntity[AirTouch3Coordinator], Se
         self._attr_options = ZONE_CONTROL_MODE_OPTIONS
         self._optimistic_mode: bool | None = None  # True = temp, False = fan
         self._optimistic_until: float = 0.0
+        
+        # Disable entity by default if zone doesn't have a sensor at startup.
+        # This hides it from the UI for zones that will never have sensors.
+        # For zones with wireless sensors not yet detected, the entity will
+        # become available once the sensor transmits (via sticky detection).
+        zone = coordinator.data.zones[zone_number]
+        if not zone.has_sensor:
+            self._attr_entity_registry_enabled_default = False
 
     @property
     def available(self) -> bool:
