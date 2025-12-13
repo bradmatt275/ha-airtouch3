@@ -58,10 +58,9 @@ async def async_setup_entry(
         entities.append(AirTouch3AcModeSelect(coordinator, ac.ac_number))
         entities.append(AirTouch3AcFanSelect(coordinator, ac.ac_number))
 
-    # Zone control mode selects (only for zones with sensors)
+    # Zone control mode selects (for all zones - availability based on has_sensor)
     for zone in coordinator.data.zones:
-        if zone.has_sensor:
-            entities.append(AirTouch3ZoneControlModeSelect(coordinator, zone.zone_number))
+        entities.append(AirTouch3ZoneControlModeSelect(coordinator, zone.zone_number))
 
     async_add_entities(entities)
 
@@ -207,6 +206,11 @@ class AirTouch3ZoneControlModeSelect(CoordinatorEntity[AirTouch3Coordinator], Se
         self._attr_options = ZONE_CONTROL_MODE_OPTIONS
         self._optimistic_mode: bool | None = None  # True = temp, False = fan
         self._optimistic_until: float = 0.0
+
+    @property
+    def available(self) -> bool:
+        """Return True if zone has a temperature sensor."""
+        return self.coordinator.data.zones[self.zone_number].has_sensor
 
     @property
     def current_option(self) -> str | None:
