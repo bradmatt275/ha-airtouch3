@@ -1357,6 +1357,204 @@ class AirTouch3Climate:
         )
 ```
 
+### 4.6 Wireless Sensor Handling & Fixes
+
+This section documents the challenges encountered with wireless temperature sensors and the solutions implemented.
+
+#### 4.6.1 Root Cause: Intermittent Sensor Transmission
+
+Wireless temperature sensors are battery-powered and transmit intermittently to conserve power. In the protocol, the "available" bit (bit 7 of each sensor byte at offset 451-482) indicates whether the sensor is **currently transmitting**, not whether a sensor physically exists.
+
+This behavior caused multiple cascading issues in the integration that required careful fixes.
+
+---
+
+#### 4.6.2 Issue: Setpoint Unit Flickering (°C ↔ %)
+
+**Symptom:** The zone setpoint sensor would flicker between showing temperature (e.g., "22°C") and fan percentage (e.g., "80%") every few seconds.
+
+**Root Cause:** The `has_sensor` field on `ZoneState` was being set based on the current transmission status of the wireless sensor. When the sensor stopped transmitting, `has_sensor` became `False`, causing the setpoint sensor to switch to percentage mode.
+
+**Solution: Sticky Sensor Detection (`client.py`)**
+
+Once a wireless sensor is detected for a zone (available bit = 1), we remember it permanently for the session:
+
+```python
+class AirTouch3Client:
+    def __init__(self, host: str, port: int = 8899):
+        # Track wireless sensors that have ever been detected
+        self._known_wireless_sensors: set[int] = set()
+    
+    def _parse_state(self, data: bytes) -> SystemState:
+        # Parse wireless sensors with sticky detection
+        for i in range(STATE_SENSOR_SLOTS):
+            byte = data[OFFSET_WIRELESS_SENSORS + i]
+            currently_available = bool(byte & 0x80)
+            
+            # Sticky: once a sensor is detected, remember it forever
+            if currently_available:
+                self._known_wireless_sensors.add(i)
+        
+        # Update zone.has_sensor using sticky detection
+        for zone in zones:
+            sensor1_slot = zone.zone_number * 2
+            sensor2_slot = zone.zone_number * 2 + 1
+            
+            has_touchpad = (tp1.assigned_zone == zone.zone_number or 
+                          tp2.assigned_zone == zone.zone_number)
+            has_wireless = (sensor1_slot in self._known_wireless_sensors or 
+                          sensor2_slot in self._known_wireless_sensors)
+            
+            zone.has_sensor = has_touchpad or has_wireless
+```
+
+**Files Modified:** `client.py`
+
+---
+
+#### 4.6.3 Issue: Fan Mode Zones Show Non-Zero % When OFF
+
+**Symptom:** When a zone without a temperature sensor (fan/percentage mode) was turned OFF, the setpoint sensor would still show the last damper percentage (e.g., "80%") instead of "0%".
+
+**Expected Behavior:** The physical AirTouch unit displays 0% for OFF zones in fan mode.
+
+**Solution: Return 0% for OFF zones (`sensor.py`)**
+
+```python
+class AirTouch3ZoneSetpointSensor:
+    @property
+    def native_value(self) -> float | None:
+        zone = self.coordinator.data.zones[self.zone_number]
+        
+        # Fan mode zones show 0% when OFF (matches physical unit behavior)
+        if not zone.has_sensor and not zone.is_on:
+            return 0.0
+        
+        if zone.has_sensor:
+            return float(zone.setpoint)  # Temperature in °C
+        return float(zone.damper_percent)  # Percentage
+```
+
+**Files Modified:** `sensor.py`
+
+---
+
+#### 4.6.4 Issue: Statistics Warning for Unit Changes
+
+**Symptom:** Home Assistant logs showed warnings about the setpoint sensor changing units, which breaks long-term statistics:
+```
+The unit of sensor.xxx_setpoint is changing from % to °C
+This will cause issues with long-term statistics
+```
+
+**Root Cause:** Home Assistant's long-term statistics (LTS) system expects sensors to maintain consistent units. The setpoint sensor legitimately changes between °C and % based on zone configuration.
+
+**Solution: Disable Long-Term Statistics (`sensor.py`)**
+
+Since the unit can legitimately change (and we don't need historical graphs of setpoints), disable statistics:
+
+```python
+class AirTouch3ZoneSetpointSensor:
+    # Disable long-term statistics - unit can change between °C and %
+    # based on whether zone has a temperature sensor
+    _attr_state_class = None  # Was SensorStateClass.MEASUREMENT
+```
+
+**Files Modified:** `sensor.py`
+
+---
+
+#### 4.6.5 Issue: Control Mode Entity Missing After Restart
+
+**Symptom:** The "Control Mode" select entity (for switching between °C and % modes) would not appear for zones with wireless sensors if Home Assistant was restarted before the sensor transmitted.
+
+**Root Cause:** Control Mode entities were only created for zones where `has_sensor=True` at startup. If the wireless sensor hadn't transmitted yet, `has_sensor=False` and no entity was created.
+
+**Solution: Create Entity for All Zones with Availability Check (`select.py`)**
+
+Create the Control Mode entity for ALL zones, but:
+1. Use the `available` property to show/hide based on `zone.has_sensor`
+2. Disable by default for zones without sensors (user can manually enable if needed)
+
+```python
+class AirTouch3ZoneControlModeSelect:
+    # Disabled by default - will be auto-enabled when sensor detected
+    _attr_entity_registry_enabled_default = False
+    
+    @property
+    def available(self) -> bool:
+        """Only available if zone has a temperature sensor."""
+        zone = self.coordinator.data.zones[self.zone_number]
+        return zone.has_sensor and self.coordinator.last_update_success
+
+# In async_setup_entry:
+async def async_setup_entry(...):
+    # Create Control Mode for ALL zones (availability controlled dynamically)
+    for i, zone in enumerate(coordinator.data.zones):
+        if zone.zone_number >= 0:
+            entities.append(AirTouch3ZoneControlModeSelect(coordinator, i))
+```
+
+**Files Modified:** `select.py`
+
+---
+
+#### 4.6.6 Issue: Zone Temperature Sensors Show "Unavailable"
+
+**Symptom:** Zone temperature sensors for rooms with wireless sensors (e.g., "TV Room", "Master") would show as "Unavailable", while zones with touchpads (e.g., "Living") worked correctly.
+
+**Root Cause:** The `_get_temperature_and_source()` method was checking the raw `sensor.available` bit from the protocol, which flickers based on transmission timing. When the sensor wasn't transmitting, `available=False` and no temperature was returned.
+
+**Solution: Use Sticky Detection for Temperature Access (`sensor.py`)**
+
+Use the sticky `zone.has_sensor` to determine if we should return temperature data, rather than the flickering `sensor.available`:
+
+```python
+class AirTouch3ZoneTemperatureSensor:
+    def _get_temperature_and_source(self) -> tuple[int | None, str | None, bool]:
+        zone = self.coordinator.data.zones[self.zone_number]
+        
+        # Check touchpads first (they report continuously)
+        # ... touchpad checks ...
+        
+        # For wireless sensors, use zone.has_sensor (sticky detection)
+        # instead of checking sensor.available which flickers
+        if not zone.has_sensor:
+            return None, None, False
+        
+        # Return temperature if sensor has ever been detected
+        # and has a valid temperature reading (> 0)
+        sensor1_index = self.zone_number * 2
+        if sensor1_index < len(data.sensors):
+            sensor1 = data.sensors[sensor1_index]
+            if sensor1.temperature > 0:  # Valid cached temperature
+                return sensor1.temperature, f"wireless_{sensor1_index + 1}", sensor1.low_battery
+        
+        # ... check sensor2 similarly ...
+```
+
+**Key Insight:** The temperature value in the protocol (bits 0-5) remains valid/cached even when the "available" bit (bit 7) is 0. The sensor just isn't actively transmitting, but the last temperature reading is still accurate.
+
+**Files Modified:** `sensor.py`
+
+---
+
+#### 4.6.7 Summary of Wireless Sensor Fixes
+
+| Issue | Root Cause | Solution | File |
+|-------|------------|----------|------|
+| Setpoint flickering °C ↔ % | `has_sensor` based on current transmission | Sticky sensor cache | `client.py` |
+| Fan mode shows % when OFF | No check for zone power state | Return 0% when OFF | `sensor.py` |
+| Statistics unit warnings | Unit changes break LTS | Disable `state_class` | `sensor.py` |
+| Control Mode missing | Entity not created at startup | Create for all, use `available` | `select.py` |
+| Temperature unavailable | Using raw `available` bit | Use sticky `has_sensor` | `sensor.py` |
+
+**Important Notes:**
+- The sticky cache is session-only (cleared on Home Assistant restart)
+- If HA restarts before a wireless sensor transmits, detection will occur on first transmission
+- Touchpad zones (physically wired) report continuously and don't have these issues
+- Temperature values in the protocol remain valid even when the "available" bit is 0
+
 ---
 
 ## 5. Error Handling

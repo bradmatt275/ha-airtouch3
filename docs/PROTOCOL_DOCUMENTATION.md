@@ -822,6 +822,34 @@ def zone_has_sensor(zone_num, state):
 
 **Important:** The `sensor_source` field in the zone feedback byte (bytes 296-311, bits 5-7) is NOT reliable for detecting sensor capability. It may be 0 even when a wireless sensor is present. Always check the actual wireless sensor bytes for the availability bit.
 
+**Intermittent Transmission Behavior:**
+
+Wireless sensors are battery-powered and transmit intermittently to conserve power. The "available" bit (bit 7) indicates whether the sensor is **currently transmitting**, not whether a sensor physically exists. This has important implications:
+
+- The available bit may be 0 even when a sensor is installed and working
+- Temperature values in bytes 0-5 remain valid/cached even when available=0
+- Software should implement "sticky detection": once a sensor is seen (available=1), remember it exists for the session
+- Touchpad sensors (wired) report continuously and don't have this issue
+
+**Recommended Implementation Pattern:**
+```python
+# Track sensors that have ever been detected (session cache)
+_known_wireless_sensors: set[int] = set()
+
+def parse_sensor(slot: int, byte: int):
+    currently_available = bool(byte & 0x80)
+    
+    # Sticky: once detected, remember it
+    if currently_available:
+        _known_wireless_sensors.add(slot)
+    
+    # Use cached knowledge for has_sensor decisions
+    sensor_exists = slot in _known_wireless_sensors
+    
+    # Temperature is valid if sensor exists, even if not currently transmitting
+    temperature = byte & 0x3F if sensor_exists else None
+```
+
 **Note:** The original documentation had bits inverted. The app's decompiled code uses `substring(0, 1)` for available and `substring(1, 2)` for low battery on a binary string with bit 7 at index 0. This means bit 7 = available, bit 6 = low battery, and bits 0-5 = temperature. Wireless sensors are battery-powered and transmit intermittently.
 
 ---

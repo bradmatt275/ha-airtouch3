@@ -101,6 +101,7 @@ class AirTouch3ZoneTemperatureSensor(CoordinatorEntity[AirTouch3Coordinator], Se
         Follows app logic: touchpad priority, then sensor1, then sensor2.
         """
         data = self.coordinator.data
+        zone = data.zones[self.zone_number]
 
         # Check touchpad 1 (assigned_zone is 0-indexed, -1 means unassigned)
         tp1 = data.touchpads[0]
@@ -112,18 +113,26 @@ class AirTouch3ZoneTemperatureSensor(CoordinatorEntity[AirTouch3Coordinator], Se
         if tp2.assigned_zone == self.zone_number and tp2.temperature is not None and tp2.temperature > 0:
             return tp2.temperature, "touchpad2", False
 
+        # For wireless sensors, use zone.has_sensor (sticky detection) to determine
+        # if we should return the temperature. The sensor's "available" bit flickers
+        # based on transmission timing, but the temperature value is still valid.
+        if not zone.has_sensor:
+            return None, None, False
+
         # Check wireless sensor 1 for this zone (slot = zone_number * 2)
         sensor1_index = self.zone_number * 2
         if sensor1_index < len(data.sensors):
             sensor1 = data.sensors[sensor1_index]
-            if sensor1.available:
+            # Return temperature if sensor has ever been detected (via has_sensor)
+            # and has a valid temperature reading (> 0)
+            if sensor1.temperature > 0:
                 return sensor1.temperature, f"wireless_{sensor1_index + 1}", sensor1.low_battery
 
         # Check wireless sensor 2 for this zone (slot = zone_number * 2 + 1)
         sensor2_index = self.zone_number * 2 + 1
         if sensor2_index < len(data.sensors):
             sensor2 = data.sensors[sensor2_index]
-            if sensor2.available:
+            if sensor2.temperature > 0:
                 return sensor2.temperature, f"wireless_{sensor2_index + 1}", sensor2.low_battery
 
         return None, None, False
