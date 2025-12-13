@@ -60,38 +60,6 @@ jobs:
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Update manifest version
-        if: steps.check.outputs.skip != 'true'
-        run: |
-          VERSION=${{ steps.version.outputs.version }}
-          # Remove 'v' prefix for manifest
-          MANIFEST_VERSION=${VERSION#v}
-          
-          # Update version in manifest.json
-          sed -i "s/\"version\": \".*\"/\"version\": \"${MANIFEST_VERSION}\"/" custom_components/airtouch3/manifest.json
-          
-          # Show the change
-          cat custom_components/airtouch3/manifest.json
-
-      - name: Commit manifest update
-        if: steps.check.outputs.skip != 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add custom_components/airtouch3/manifest.json
-          
-          # Get the changelog for commit message
-          PREV_TAG=$(git tag -l "v*" --sort=-v:refname | head -n1)
-          if [ -z "$PREV_TAG" ]; then
-            CHANGELOG="Initial release"
-          else
-            CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges | head -20)
-          fi
-          
-          # Create commit with version and changelog
-          git commit -m "Bump version to ${{ steps.version.outputs.version }}:" -m "${CHANGELOG}" || echo "No changes to commit"
-          git push
-
       - name: Generate release notes
         if: steps.check.outputs.skip != 'true'
         id: notes
