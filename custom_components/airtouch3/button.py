@@ -71,22 +71,27 @@ class AirTouch3SetpointUpButton(CoordinatorEntity[AirTouch3Coordinator], ButtonE
         """Handle button press - increase setpoint."""
         LOGGER.debug("Setpoint UP pressed for zone %d", self.zone_number)
         zone = self.coordinator.data.zones[self.zone_number]
+        device_id = self.coordinator.data.device_id
 
-        # Check if already at maximum - don't send command if so
+        # Get current value - use optimistic if set (for rapid presses), otherwise actual
+        optimistic = AirTouch3ZoneSetpointSensor.get_optimistic_value(device_id, self.zone_number)
+        
         if self._is_temperature_mode:
-            if zone.setpoint is not None and zone.setpoint >= MAX_TEMP:
+            current = optimistic if optimistic is not None else zone.setpoint
+            if current is not None and current >= MAX_TEMP:
                 LOGGER.debug("Zone %d already at max temp %d, ignoring", self.zone_number, MAX_TEMP)
                 return
-            new_value = min(zone.setpoint + 1, MAX_TEMP) if zone.setpoint is not None else MAX_TEMP
+            new_value = min((current or 0) + 1, MAX_TEMP)
         else:
-            if zone.damper_percent >= 100:
+            current = optimistic if optimistic is not None else zone.damper_percent
+            if current >= 100:
                 LOGGER.debug("Zone %d already at max damper 100%%, ignoring", self.zone_number)
                 return
-            new_value = min(zone.damper_percent + 5, 100)
+            new_value = min(current + 5, 100)
 
-        # Set optimistic value immediately
+        # Set optimistic value immediately (with 'up' direction for clearing logic)
         AirTouch3ZoneSetpointSensor.set_optimistic_value(
-            self.coordinator.data.device_id, self.zone_number, new_value
+            device_id, self.zone_number, new_value, 'up'
         )
         self.coordinator.async_set_updated_data(self.coordinator.data)
 
@@ -134,22 +139,27 @@ class AirTouch3SetpointDownButton(CoordinatorEntity[AirTouch3Coordinator], Butto
         """Handle button press - decrease setpoint."""
         LOGGER.debug("Setpoint DOWN pressed for zone %d", self.zone_number)
         zone = self.coordinator.data.zones[self.zone_number]
+        device_id = self.coordinator.data.device_id
 
-        # Check if already at minimum - don't send command if so
+        # Get current value - use optimistic if set (for rapid presses), otherwise actual
+        optimistic = AirTouch3ZoneSetpointSensor.get_optimistic_value(device_id, self.zone_number)
+        
         if self._is_temperature_mode:
-            if zone.setpoint is not None and zone.setpoint <= MIN_TEMP:
+            current = optimistic if optimistic is not None else zone.setpoint
+            if current is not None and current <= MIN_TEMP:
                 LOGGER.debug("Zone %d already at min temp %d, ignoring", self.zone_number, MIN_TEMP)
                 return
-            new_value = max(zone.setpoint - 1, MIN_TEMP) if zone.setpoint is not None else MIN_TEMP
+            new_value = max((current or MIN_TEMP) - 1, MIN_TEMP)
         else:
-            if zone.damper_percent <= 0:
+            current = optimistic if optimistic is not None else zone.damper_percent
+            if current <= 0:
                 LOGGER.debug("Zone %d already at min damper 0%%, ignoring", self.zone_number)
                 return
-            new_value = max(zone.damper_percent - 5, 0)
+            new_value = max(current - 5, 0)
 
-        # Set optimistic value immediately
+        # Set optimistic value immediately (with 'down' direction for clearing logic)
         AirTouch3ZoneSetpointSensor.set_optimistic_value(
-            self.coordinator.data.device_id, self.zone_number, new_value
+            device_id, self.zone_number, new_value, 'down'
         )
         self.coordinator.async_set_updated_data(self.coordinator.data)
 

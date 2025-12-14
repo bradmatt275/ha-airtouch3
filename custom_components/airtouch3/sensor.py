@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -22,6 +23,12 @@ from .coordinator import AirTouch3Coordinator
 from .switch import get_zone_device_info, get_main_device_info
 
 LOGGER = logging.getLogger(__name__)
+
+# How long to hold optimistic values before falling back to actual (seconds)
+# This should be long enough that pauses between button presses don't cause
+# the value to "jump", but short enough to self-correct if truly out of sync.
+# Using 30s to match the default coordinator refresh interval.
+OPTIMISTIC_TIMEOUT = 30.0
 
 
 async def async_setup_entry(
@@ -213,8 +220,10 @@ class AirTouch3ZoneSetpointSensor(CoordinatorEntity[AirTouch3Coordinator], Senso
     _attr_name = "Setpoint"
 
     # Class-level registry for optimistic setpoint values
-    # Maps (device_id, zone_number) -> optimistic_value
-    _optimistic_values: dict[tuple[str, int], int] = {}
+    # Maps (device_id, zone_number) -> (optimistic_value, direction, timestamp)
+    # direction: 'up' or 'down' to know how to compare for clearing
+    # timestamp: when the optimistic value was set (for timeout fallback)
+    _optimistic_values: dict[tuple[str, int], tuple[int, str, float]] = {}
 
     def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
         """Initialize setpoint sensor."""
@@ -222,14 +231,27 @@ class AirTouch3ZoneSetpointSensor(CoordinatorEntity[AirTouch3Coordinator], Senso
         self.zone_number = zone_number
 
     @classmethod
-    def set_optimistic_value(cls, device_id: str, zone_number: int, value: int) -> None:
+    def set_optimistic_value(cls, device_id: str, zone_number: int, value: int, direction: str = 'up') -> None:
         """Set an optimistic setpoint value (called by buttons)."""
-        cls._optimistic_values[(device_id, zone_number)] = value
+        cls._optimistic_values[(device_id, zone_number)] = (value, direction, time.monotonic())
 
     @classmethod
     def clear_optimistic_value(cls, device_id: str, zone_number: int) -> None:
         """Clear the optimistic value (called after coordinator update)."""
         cls._optimistic_values.pop((device_id, zone_number), None)
+
+    @classmethod
+    def get_optimistic_value(cls, device_id: str, zone_number: int) -> int | None:
+        """Get the current optimistic value if set and not expired."""
+        entry = cls._optimistic_values.get((device_id, zone_number))
+        if entry is None:
+            return None
+        value, direction, timestamp = entry
+        # Check if expired
+        if time.monotonic() - timestamp > OPTIMISTIC_TIMEOUT:
+            cls._optimistic_values.pop((device_id, zone_number), None)
+            return None
+        return value
 
     @property
     def _optimistic_key(self) -> tuple[str, int]:
@@ -247,8 +269,8 @@ class AirTouch3ZoneSetpointSensor(CoordinatorEntity[AirTouch3Coordinator], Senso
         """Return current setpoint value, preferring optimistic value."""
         zone = self.coordinator.data.zones[self.zone_number]
 
-        # Check for optimistic value first
-        optimistic = self._optimistic_values.get(self._optimistic_key)
+        # Check for optimistic value first (get_optimistic_value handles timeout)
+        optimistic = self.get_optimistic_value(*self._optimistic_key)
         if optimistic is not None:
             return float(optimistic)
 
@@ -264,17 +286,34 @@ class AirTouch3ZoneSetpointSensor(CoordinatorEntity[AirTouch3Coordinator], Senso
         return float(zone.damper_percent)
 
     def _handle_coordinator_update(self) -> None:
-        """Handle coordinator update - clear optimistic value if actual matches."""
+        """Handle coordinator update - clear optimistic value if actual has caught up or timed out."""
         zone = self.coordinator.data.zones[self.zone_number]
-        optimistic = self._optimistic_values.get(self._optimistic_key)
-        if optimistic is not None:
-            # Check if actual value matches optimistic
-            if self._is_temperature_mode:
-                actual = zone.setpoint
-            else:
-                actual = zone.damper_percent
-            if actual == optimistic:
+        optimistic_entry = self._optimistic_values.get(self._optimistic_key)
+        if optimistic_entry is not None:
+            optimistic_value, direction, timestamp = optimistic_entry
+            
+            # Check timeout first - always clear if expired
+            if time.monotonic() - timestamp > OPTIMISTIC_TIMEOUT:
+                LOGGER.debug(
+                    "Zone %d optimistic value %d timed out, clearing",
+                    self.zone_number, optimistic_value
+                )
                 self.clear_optimistic_value(*self._optimistic_key)
+            else:
+                # Get actual value from coordinator
+                if self._is_temperature_mode:
+                    actual = zone.setpoint
+                else:
+                    actual = zone.damper_percent
+                
+                if actual is not None:
+                    # Clear if actual has caught up to or exceeded optimistic
+                    # For 'up' direction: clear when actual >= optimistic
+                    # For 'down' direction: clear when actual <= optimistic
+                    if direction == 'up' and actual >= optimistic_value:
+                        self.clear_optimistic_value(*self._optimistic_key)
+                    elif direction == 'down' and actual <= optimistic_value:
+                        self.clear_optimistic_value(*self._optimistic_key)
         super()._handle_coordinator_update()
 
     @property
