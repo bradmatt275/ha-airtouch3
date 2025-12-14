@@ -85,6 +85,8 @@ STATE_TOUCHPAD_COUNT = 2
 STATE_ZONE_MAX = 16
 STATE_SENSOR_SLOTS = 32
 
+# Temperature limits for zones in temperature control mode
+# These are hardware limits enforced by the AirTouch 3 unit
 MIN_TEMP = 16
-MAX_TEMP = 30
+MAX_TEMP = 32
 TEMP_STEP = 1

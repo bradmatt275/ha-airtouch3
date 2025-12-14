@@ -146,7 +146,9 @@ Byte 12: Checksum
 
 **Purpose:** Increment or decrement target temperature by 1°C
 
-**Important:** There is no direct "set to X" command. To reach a target, loop sending `TEMP_CMD` up/down until the reported setpoint (bytes 431/432) matches your goal, and respect min/max limits reported by the unit.
+**Hardware Limits:** The AirTouch 3 enforces a temperature range of **16°C to 32°C**. Commands sent at these limits will be ignored by the unit.
+
+**Important:** There is no direct "set to X" command. To reach a target, loop sending `TEMP_CMD` up/down until the reported setpoint (bytes 431/432) matches your goal, and respect the min/max limits (16-32°C).
 
 **Message Format:**
 ```
@@ -307,8 +309,10 @@ Byte 6-11: 0x00
 Byte 12: Checksum
 ```
 
-In **temperature mode**: Adjusts setpoint by 1°C per command
-In **percentage mode**: Adjusts damper opening by 5% per command
+In **temperature mode**: Adjusts setpoint by 1°C per command (range: 16-32°C)
+In **percentage mode**: Adjusts damper opening by 5% per command (range: 0-100%)
+
+**Note:** Commands sent when already at min/max limits will be ignored by the unit.
 
 ---
 

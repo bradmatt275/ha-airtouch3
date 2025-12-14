@@ -222,7 +222,8 @@ class AirTouch3Climate(CoordinatorEntity[AirTouch3Coordinator], ClimateEntity):
         """Set target temperature."""
         if ATTR_TEMPERATURE not in kwargs:
             return
-        temperature = int(kwargs[ATTR_TEMPERATURE])
+        # Clamp to hardware limits (16-32°C)
+        temperature = max(MIN_TEMP, min(int(kwargs[ATTR_TEMPERATURE]), MAX_TEMP))
         await self.coordinator.client.ac_set_temperature(self.ac_number, temperature)
         await self.coordinator.async_request_refresh()
 

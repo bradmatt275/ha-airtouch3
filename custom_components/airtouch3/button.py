@@ -72,12 +72,19 @@ class AirTouch3SetpointUpButton(CoordinatorEntity[AirTouch3Coordinator], ButtonE
         LOGGER.debug("Setpoint UP pressed for zone %d", self.zone_number)
         zone = self.coordinator.data.zones[self.zone_number]
 
-        # Set optimistic value immediately
-        if self._is_temperature_mode and zone.setpoint is not None:
-            new_value = min(zone.setpoint + 1, MAX_TEMP)
+        # Check if already at maximum - don't send command if so
+        if self._is_temperature_mode:
+            if zone.setpoint is not None and zone.setpoint >= MAX_TEMP:
+                LOGGER.debug("Zone %d already at max temp %d, ignoring", self.zone_number, MAX_TEMP)
+                return
+            new_value = min(zone.setpoint + 1, MAX_TEMP) if zone.setpoint is not None else MAX_TEMP
         else:
+            if zone.damper_percent >= 100:
+                LOGGER.debug("Zone %d already at max damper 100%%, ignoring", self.zone_number)
+                return
             new_value = min(zone.damper_percent + 5, 100)
 
+        # Set optimistic value immediately
         AirTouch3ZoneSetpointSensor.set_optimistic_value(
             self.coordinator.data.device_id, self.zone_number, new_value
         )
@@ -128,12 +135,19 @@ class AirTouch3SetpointDownButton(CoordinatorEntity[AirTouch3Coordinator], Butto
         LOGGER.debug("Setpoint DOWN pressed for zone %d", self.zone_number)
         zone = self.coordinator.data.zones[self.zone_number]
 
-        # Set optimistic value immediately
-        if self._is_temperature_mode and zone.setpoint is not None:
-            new_value = max(zone.setpoint - 1, MIN_TEMP)
+        # Check if already at minimum - don't send command if so
+        if self._is_temperature_mode:
+            if zone.setpoint is not None and zone.setpoint <= MIN_TEMP:
+                LOGGER.debug("Zone %d already at min temp %d, ignoring", self.zone_number, MIN_TEMP)
+                return
+            new_value = max(zone.setpoint - 1, MIN_TEMP) if zone.setpoint is not None else MIN_TEMP
         else:
+            if zone.damper_percent <= 0:
+                LOGGER.debug("Zone %d already at min damper 0%%, ignoring", self.zone_number)
+                return
             new_value = max(zone.damper_percent - 5, 0)
 
+        # Set optimistic value immediately
         AirTouch3ZoneSetpointSensor.set_optimistic_value(
             self.coordinator.data.device_id, self.zone_number, new_value
         )

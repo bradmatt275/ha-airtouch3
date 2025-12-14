@@ -1557,6 +1557,81 @@ class AirTouch3ZoneTemperatureSensor:
 
 ---
 
+### 4.7 Temperature Setpoint Limits
+
+The AirTouch 3 hardware enforces temperature setpoint limits of **16°C to 32°C** for zones in temperature control mode. The integration enforces these limits in the UI to prevent confusion.
+
+#### 4.7.1 Implementation
+
+**Constants (`const.py`):**
+```python
+# Temperature limits for zones in temperature control mode
+# These are hardware limits enforced by the AirTouch 3 unit
+MIN_TEMP = 16
+MAX_TEMP = 32
+TEMP_STEP = 1
+```
+
+**Climate Entity (`climate.py`):**
+- Sets `_attr_min_temp = MIN_TEMP` and `_attr_max_temp = MAX_TEMP` which constrains the HA temperature slider
+- `async_set_temperature()` clamps values as a safety measure
+
+```python
+class AirTouch3Climate:
+    _attr_min_temp = MIN_TEMP  # 16°C
+    _attr_max_temp = MAX_TEMP  # 32°C
+    _attr_target_temperature_step = TEMP_STEP  # 1°C
+    
+    async def async_set_temperature(self, **kwargs):
+        # Clamp to hardware limits (16-32°C)
+        temperature = max(MIN_TEMP, min(int(kwargs[ATTR_TEMPERATURE]), MAX_TEMP))
+        await self.coordinator.client.ac_set_temperature(self.ac_number, temperature)
+```
+
+**Setpoint Buttons (`button.py`):**
+- Check current value before sending command
+- If already at limit, button press is ignored (no command sent)
+- Prevents unnecessary protocol traffic and UI confusion
+
+```python
+class AirTouch3SetpointUpButton:
+    async def async_press(self):
+        zone = self.coordinator.data.zones[self.zone_number]
+        
+        # Don't send command if already at maximum
+        if self._is_temperature_mode:
+            if zone.setpoint >= MAX_TEMP:
+                return  # Already at 32°C, ignore
+        else:
+            if zone.damper_percent >= 100:
+                return  # Already at 100%, ignore
+        
+        # ... send command ...
+
+class AirTouch3SetpointDownButton:
+    async def async_press(self):
+        zone = self.coordinator.data.zones[self.zone_number]
+        
+        # Don't send command if already at minimum
+        if self._is_temperature_mode:
+            if zone.setpoint <= MIN_TEMP:
+                return  # Already at 16°C, ignore
+        else:
+            if zone.damper_percent <= 0:
+                return  # Already at 0%, ignore
+        
+        # ... send command ...
+```
+
+#### 4.7.2 Damper Percentage Limits
+
+For zones without temperature sensors (fan/percentage mode), the limits are:
+- **Minimum:** 0% (zone effectively closed)
+- **Maximum:** 100% (zone fully open)
+- **Step:** 5% per button press
+
+---
+
 ## 5. Error Handling
 
 ### 5.1 Connection Errors
