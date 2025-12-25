@@ -1632,6 +1632,177 @@ For zones without temperature sensors (fan/percentage mode), the limits are:
 
 ---
 
+### 4.8 State Polling & Buffer Management
+
+The AirTouch 3 device broadcasts state messages periodically (approximately every 6-8 seconds) in addition to responding to commands. This creates a challenge for polling-based state updates.
+
+#### 4.8.1 Issue: Stale Data Causing Value "Stepping"
+
+**Symptom:** When changing values on the physical unit (e.g., fan percentage from 100% to 60%), Home Assistant would show the values "stepping" toward the target over multiple poll cycles:
+- First refresh: 100%
+- Second refresh: 95%
+- Third refresh: 90%
+- ... eventually: 60%
+
+Additionally, fetch times were suspiciously fast (0.001 seconds instead of expected ~0.2 seconds for network round-trips).
+
+**Root Cause:** The `MessageBuffer` class accumulates TCP stream data between polls. The device's periodic broadcasts would queue up in the buffer. When `refresh_state()` was called:
+1. It sent `CMD_INIT` to request fresh state
+2. `_wait_for_state()` read from the buffer
+3. Old queued messages were returned instead of the fresh response
+4. The oldest message (with stale data) was parsed and returned
+
+**Solution: Drain Stale Data Before Refresh (`client.py`)**
+
+Added a `_drain_stale_data()` method that runs before each refresh to discard any queued messages:
+
+```python
+async def refresh_state(self) -> Optional[SystemState]:
+    """Force a fresh state fetch by sending init command."""
+    if not self.connected:
+        if not await self.connect():
+            return None
+
+    # Drain any stale data from the socket and buffer
+    await self._drain_stale_data()
+
+    init_msg = self._create_command(const.CMD_INIT)
+    return await self._send_command(init_msg)
+
+async def _drain_stale_data(self) -> None:
+    """Drain any pending data from socket buffer to ensure fresh reads."""
+    if not self.reader:
+        return
+
+    drained_messages = 0
+    drained_bytes = 0
+
+    # Non-blocking reads to drain any pending data
+    while True:
+        try:
+            data = await asyncio.wait_for(
+                self.reader.read(1024),
+                timeout=0.05,  # 50ms - just enough to check if data is waiting
+            )
+            if not data:
+                break
+            drained_bytes += len(data)
+            messages = self._buffer.add_data(data)
+            drained_messages += len(messages)
+        except asyncio.TimeoutError:
+            break  # No more data waiting
+        except Exception:
+            break
+
+    # Clear any partial data remaining in the buffer
+    if self._buffer.buffer:
+        drained_bytes += len(self._buffer.buffer)
+        self._buffer.buffer.clear()
+
+    if drained_messages > 0 or drained_bytes > 0:
+        LOGGER.debug(
+            "Drained %d stale messages (%d bytes) before refresh",
+            drained_messages, drained_bytes
+        )
+```
+
+**Result:** Values now update immediately on the first poll after a physical change, with proper network round-trip times (~0.2 seconds).
+
+**Files Modified:** `client.py`
+
+---
+
+### 4.9 Optimistic Mode Synchronization
+
+When the zone control mode changes (Temperature ↔ Fan), multiple entities need to respond immediately without waiting for the next coordinator refresh.
+
+#### 4.9.1 Issue: Setpoint Unit Lag After Mode Change
+
+**Symptom:** When changing a zone from Temperature mode to Fan mode:
+1. The Control Mode select would update immediately (optimistic)
+2. The Setpoint sensor would still show °C instead of %
+3. The Setpoint Up/Down buttons would increment by 1°C instead of 5%
+4. After 30 seconds (next refresh), everything would sync correctly
+
+**Root Cause:** Each entity had its own optimistic state handling:
+- `AirTouch3ZoneControlModeSelect` had instance-level `_optimistic_mode`
+- `AirTouch3ZoneSetpointSensor` checked `zone.temperature_control` from coordinator
+- `AirTouch3SetpointUpButton` and `AirTouch3SetpointDownButton` also checked coordinator data
+
+The entities didn't share optimistic state, so only the select knew about the pending mode change.
+
+**Solution: Shared Optimistic Mode Registry**
+
+Created a class-level registry in `AirTouch3ZoneControlModeSelect` that all entities can access:
+
+**select.py:**
+```python
+class AirTouch3ZoneControlModeSelect(CoordinatorEntity, SelectEntity):
+    # Class-level registry shared with setpoint sensor and buttons
+    # Maps (device_id, zone_number) -> (is_temp_mode, timestamp)
+    _optimistic_modes: dict[tuple[str, int], tuple[bool, float]] = {}
+
+    @classmethod
+    def set_optimistic_mode(cls, device_id: str, zone_number: int, is_temp_mode: bool) -> None:
+        """Set an optimistic mode value (shared with other entities)."""
+        cls._optimistic_modes[(device_id, zone_number)] = (is_temp_mode, time.monotonic())
+
+    @classmethod
+    def get_optimistic_mode(cls, device_id: str, zone_number: int) -> bool | None:
+        """Get the current optimistic mode if set and not expired."""
+        entry = cls._optimistic_modes.get((device_id, zone_number))
+        if entry is None:
+            return None
+        is_temp_mode, timestamp = entry
+        if time.monotonic() - timestamp > OPTIMISTIC_HOLD_SECONDS:
+            cls._optimistic_modes.pop((device_id, zone_number), None)
+            return None
+        return is_temp_mode
+
+    async def async_select_option(self, option: str) -> None:
+        """Change the zone control mode."""
+        if target_is_temp != current_is_temp:
+            self.set_optimistic_mode(*self._optimistic_key, target_is_temp)
+            # Trigger update for all entities
+            self.coordinator.async_set_updated_data(self.coordinator.data)
+            await self.coordinator.client.zone_toggle_mode(self.zone_number)
+            await self.coordinator.async_request_refresh()
+```
+
+**sensor.py and button.py:**
+```python
+from .select import AirTouch3ZoneControlModeSelect
+
+@property
+def _is_temperature_mode(self) -> bool:
+    """Check if zone is in temperature mode."""
+    zone = self.coordinator.data.zones[self.zone_number]
+    if not zone.has_sensor:
+        return False
+
+    # Check for optimistic mode from control mode select
+    optimistic_mode = AirTouch3ZoneControlModeSelect.get_optimistic_mode(
+        self.coordinator.data.device_id, self.zone_number
+    )
+    if optimistic_mode is not None:
+        return optimistic_mode
+
+    return zone.temperature_control
+```
+
+**Result:** When control mode changes, all entities immediately respond:
+
+| Entity | Immediate Behavior |
+|--------|-------------------|
+| Control Mode Select | Shows new mode (Temperature/Fan) |
+| Setpoint Sensor | Switches unit (°C ↔ %) |
+| Setpoint Up Button | Increments correctly (1°C or 5%) |
+| Setpoint Down Button | Decrements correctly (1°C or 5%) |
+
+**Files Modified:** `select.py`, `sensor.py`, `button.py`
+
+---
+
 ## 5. Error Handling
 
 ### 5.1 Connection Errors
