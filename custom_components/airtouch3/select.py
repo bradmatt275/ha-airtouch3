@@ -199,13 +199,15 @@ class AirTouch3ZoneControlModeSelect(CoordinatorEntity[AirTouch3Coordinator], Se
     _attr_has_entity_name = True
     _attr_name = "Control Mode"
 
+    # Class-level registry for optimistic mode values, shared with setpoint sensor.
+    # Maps (device_id, zone_number) -> (is_temp_mode, timestamp)
+    _optimistic_modes: dict[tuple[str, int], tuple[bool, float]] = {}
+
     def __init__(self, coordinator: AirTouch3Coordinator, zone_number: int) -> None:
         """Initialize zone control mode select."""
         super().__init__(coordinator)
         self.zone_number = zone_number
         self._attr_options = ZONE_CONTROL_MODE_OPTIONS
-        self._optimistic_mode: bool | None = None  # True = temp, False = fan
-        self._optimistic_until: float = 0.0
         
         # Disable entity by default if zone doesn't have a sensor at startup.
         # This hides it from the UI for zones that will never have sensors.
@@ -214,6 +216,34 @@ class AirTouch3ZoneControlModeSelect(CoordinatorEntity[AirTouch3Coordinator], Se
         zone = coordinator.data.zones[zone_number]
         if not zone.has_sensor:
             self._attr_entity_registry_enabled_default = False
+
+    @classmethod
+    def set_optimistic_mode(cls, device_id: str, zone_number: int, is_temp_mode: bool) -> None:
+        """Set an optimistic mode value (shared with setpoint sensor)."""
+        cls._optimistic_modes[(device_id, zone_number)] = (is_temp_mode, time.monotonic())
+
+    @classmethod
+    def clear_optimistic_mode(cls, device_id: str, zone_number: int) -> None:
+        """Clear the optimistic mode value."""
+        cls._optimistic_modes.pop((device_id, zone_number), None)
+
+    @classmethod
+    def get_optimistic_mode(cls, device_id: str, zone_number: int) -> bool | None:
+        """Get the current optimistic mode if set and not expired."""
+        entry = cls._optimistic_modes.get((device_id, zone_number))
+        if entry is None:
+            return None
+        is_temp_mode, timestamp = entry
+        # Check if expired (use same timeout as other optimistic values)
+        if time.monotonic() - timestamp > OPTIMISTIC_HOLD_SECONDS:
+            cls._optimistic_modes.pop((device_id, zone_number), None)
+            return None
+        return is_temp_mode
+
+    @property
+    def _optimistic_key(self) -> tuple[str, int]:
+        """Get the key for optimistic mode lookup."""
+        return (self.coordinator.data.device_id, self.zone_number)
 
     @property
     def available(self) -> bool:
@@ -224,9 +254,9 @@ class AirTouch3ZoneControlModeSelect(CoordinatorEntity[AirTouch3Coordinator], Se
     def current_option(self) -> str | None:
         """Return current control mode."""
         # Check optimistic state first
-        if self._optimistic_mode is not None and time.monotonic() < self._optimistic_until:
-            return ZONE_CONTROL_MODE_TEMPERATURE if self._optimistic_mode else ZONE_CONTROL_MODE_FAN
-        self._optimistic_mode = None
+        optimistic = self.get_optimistic_mode(*self._optimistic_key)
+        if optimistic is not None:
+            return ZONE_CONTROL_MODE_TEMPERATURE if optimistic else ZONE_CONTROL_MODE_FAN
         # Get actual state from coordinator
         is_temp_mode = self.coordinator.data.zones[self.zone_number].temperature_control
         return ZONE_CONTROL_MODE_TEMPERATURE if is_temp_mode else ZONE_CONTROL_MODE_FAN
@@ -240,14 +270,12 @@ class AirTouch3ZoneControlModeSelect(CoordinatorEntity[AirTouch3Coordinator], Se
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from coordinator."""
-        if self._optimistic_mode is not None:
+        optimistic = self.get_optimistic_mode(*self._optimistic_key)
+        if optimistic is not None:
             actual_mode = self.coordinator.data.zones[self.zone_number].temperature_control
-            if time.monotonic() >= self._optimistic_until:
-                # Timeout expired, clear optimistic state
-                self._optimistic_mode = None
-            elif actual_mode == self._optimistic_mode:
+            if actual_mode == optimistic:
                 # Actual state matches expected, clear optimistic state
-                self._optimistic_mode = None
+                self.clear_optimistic_mode(*self._optimistic_key)
         super()._handle_coordinator_update()
 
     async def async_select_option(self, option: str) -> None:
@@ -257,9 +285,10 @@ class AirTouch3ZoneControlModeSelect(CoordinatorEntity[AirTouch3Coordinator], Se
 
         # Only send toggle if we need to change the mode
         if target_is_temp != current_is_temp:
-            self._optimistic_mode = target_is_temp
-            self._optimistic_until = time.monotonic() + OPTIMISTIC_HOLD_SECONDS
+            self.set_optimistic_mode(*self._optimistic_key, target_is_temp)
+            # Trigger update for this entity and the setpoint sensor
             self.async_write_ha_state()
+            self.coordinator.async_set_updated_data(self.coordinator.data)
             await self.coordinator.client.zone_toggle_mode(self.zone_number)
             await self.coordinator.async_request_refresh()
 

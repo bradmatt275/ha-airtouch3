@@ -20,6 +20,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import AirTouch3Coordinator
+from .select import AirTouch3ZoneControlModeSelect
 from .switch import get_zone_device_info, get_main_device_info
 
 LOGGER = logging.getLogger(__name__)
@@ -260,9 +261,23 @@ class AirTouch3ZoneSetpointSensor(CoordinatorEntity[AirTouch3Coordinator], Senso
 
     @property
     def _is_temperature_mode(self) -> bool:
-        """Check if zone is in temperature mode (has sensor and temp control enabled)."""
+        """Check if zone is in temperature mode (has sensor and temp control enabled).
+
+        Checks optimistic mode first (for immediate UI feedback when mode changes),
+        then falls back to actual coordinator data.
+        """
         zone = self.coordinator.data.zones[self.zone_number]
-        return zone.has_sensor and zone.temperature_control
+        if not zone.has_sensor:
+            return False
+
+        # Check for optimistic mode from control mode select (for immediate UI sync)
+        optimistic_mode = AirTouch3ZoneControlModeSelect.get_optimistic_mode(
+            self.coordinator.data.device_id, self.zone_number
+        )
+        if optimistic_mode is not None:
+            return optimistic_mode
+
+        return zone.temperature_control
 
     @property
     def native_value(self) -> float | None:

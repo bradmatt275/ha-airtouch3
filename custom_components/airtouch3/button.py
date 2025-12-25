@@ -16,6 +16,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, MIN_TEMP, MAX_TEMP
 from .coordinator import AirTouch3Coordinator
+from .select import AirTouch3ZoneControlModeSelect
 from .sensor import AirTouch3ZoneSetpointSensor
 from .switch import get_main_device_info, get_zone_device_info
 
@@ -58,9 +59,23 @@ class AirTouch3SetpointUpButton(CoordinatorEntity[AirTouch3Coordinator], ButtonE
 
     @property
     def _is_temperature_mode(self) -> bool:
-        """Check if zone is in temperature mode."""
+        """Check if zone is in temperature mode.
+
+        Checks optimistic mode first (for immediate response after mode change),
+        then falls back to actual coordinator data.
+        """
         zone = self.coordinator.data.zones[self.zone_number]
-        return zone.has_sensor and zone.temperature_control
+        if not zone.has_sensor:
+            return False
+
+        # Check for optimistic mode from control mode select
+        optimistic_mode = AirTouch3ZoneControlModeSelect.get_optimistic_mode(
+            self.coordinator.data.device_id, self.zone_number
+        )
+        if optimistic_mode is not None:
+            return optimistic_mode
+
+        return zone.temperature_control
 
     @property
     def icon(self) -> str:
@@ -126,9 +141,23 @@ class AirTouch3SetpointDownButton(CoordinatorEntity[AirTouch3Coordinator], Butto
 
     @property
     def _is_temperature_mode(self) -> bool:
-        """Check if zone is in temperature mode."""
+        """Check if zone is in temperature mode.
+
+        Checks optimistic mode first (for immediate response after mode change),
+        then falls back to actual coordinator data.
+        """
         zone = self.coordinator.data.zones[self.zone_number]
-        return zone.has_sensor and zone.temperature_control
+        if not zone.has_sensor:
+            return False
+
+        # Check for optimistic mode from control mode select
+        optimistic_mode = AirTouch3ZoneControlModeSelect.get_optimistic_mode(
+            self.coordinator.data.device_id, self.zone_number
+        )
+        if optimistic_mode is not None:
+            return optimistic_mode
+
+        return zone.temperature_control
 
     @property
     def icon(self) -> str:

@@ -128,13 +128,64 @@ class AirTouch3Client:
         return await self._wait_for_state()
 
     async def refresh_state(self) -> Optional[SystemState]:
-        """Force a fresh state fetch by sending init command."""
+        """Force a fresh state fetch by sending init command.
+
+        Drains any stale buffered data before sending the command to ensure
+        we get a fresh response rather than returning old cached messages.
+        """
         if not self.connected:
             if not await self.connect():
                 return None
 
+        # Drain any stale data from the socket and buffer before requesting fresh state.
+        # The AirTouch 3 device broadcasts state messages periodically, which can
+        # accumulate in the TCP buffer between polls. Without draining, we'd return
+        # stale data causing values to appear to "step" toward the actual value.
+        await self._drain_stale_data()
+
         init_msg = self._create_command(const.CMD_INIT)
         return await self._send_command(init_msg)
+
+    async def _drain_stale_data(self) -> None:
+        """Drain any pending data from socket buffer to ensure fresh reads.
+
+        This prevents returning stale state messages that accumulated between polls.
+        """
+        if not self.reader:
+            return
+
+        drained_messages = 0
+        drained_bytes = 0
+
+        # Non-blocking reads to drain any pending data
+        while True:
+            try:
+                # Use a very short timeout to check for pending data without blocking
+                data = await asyncio.wait_for(
+                    self.reader.read(1024),
+                    timeout=0.05,  # 50ms - just enough to check if data is waiting
+                )
+                if not data:
+                    break
+                drained_bytes += len(data)
+                messages = self._buffer.add_data(data)
+                drained_messages += len(messages)
+            except asyncio.TimeoutError:
+                # No more data waiting - good, we're done draining
+                break
+            except Exception:  # noqa: BLE001
+                break
+
+        # Also clear any partial data remaining in the buffer
+        if self._buffer.buffer:
+            drained_bytes += len(self._buffer.buffer)
+            self._buffer.buffer.clear()
+
+        if drained_messages > 0 or drained_bytes > 0:
+            LOGGER.debug(
+                "Drained %d stale messages (%d bytes) before refresh",
+                drained_messages, drained_bytes
+            )
 
     async def ac_power_toggle(self, ac_num: int) -> bool:
         """Toggle AC power."""
