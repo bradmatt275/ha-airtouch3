@@ -1,5 +1,8 @@
 # AirTouch 3 Home Assistant Integration
 
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![GitHub Release](https://img.shields.io/github/v/release/bradmatt275/ha-airtouch3)](https://github.com/bradmatt275/ha-airtouch3/releases)
+
 Control your Polyaire AirTouch 3 air conditioning system locally from Home Assistant. The integration speaks the native TCP protocol (port 8899) to expose AC climate entities, zone controls, and temperature sensors.
 
 ## Wiki
@@ -31,6 +34,8 @@ Each zone is represented as a sub-device with the following entities:
 ## Installation
 
 ### HACS (recommended)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=bradmatt275&repository=ha-airtouch3&category=integration)
+
 1. In Home Assistant, open HACS → Integrations.
 2. Click the three dots → **Custom repositories**.
 3. Add `https://github.com/bradmatt275/ha-airtouch3` as category **Integration**.
